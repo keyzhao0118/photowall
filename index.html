@@ -3,903 +3,1120 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>📸 照片墙 - PhotoWall</title>
+<title>照片墙 · PhotoWall</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0a0a1a;
-    --cell-size: 110px;
-    --name-size: 14px;
-  }
+  :root { --accent: #ff6b9d; --accent2: #7b5cff; }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #06060f; }
+
   body {
-    width: 100vw; height: 100vh;
-    overflow: hidden;
-    background: var(--bg);
-    font-family: 'Segoe UI', sans-serif;
-    user-select: none;
-    -webkit-user-select: none;
-    cursor: grab;
+    font-family: 'ZCOOL KuaiLe', 'YouYuan', '幼圆', 'Microsoft YaHei', sans-serif;
+    user-select: none; -webkit-user-select: none;
+    cursor: grab; color: #fff;
   }
-  body:active { cursor: grabbing; }
   body.dragging { cursor: grabbing; }
 
-  /* ---- canvas layer ---- */
-  #canvas {
-    position: fixed; top: 0; left: 0;
-    width: 100%; height: 100%;
-    z-index: 1;
+  #stage { position: fixed; inset: 0; z-index: 1; display: block; }
+
+  #glow {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(60vw 60vw at 20% 15%, rgba(123,92,255,0.18), transparent 60%),
+      radial-gradient(55vw 55vw at 82% 78%, rgba(255,107,157,0.16), transparent 62%),
+      radial-gradient(40vw 40vw at 60% 45%, rgba(64,196,255,0.10), transparent 65%),
+      #06060f;
+    animation: breathe 18s ease-in-out infinite alternate;
+  }
+  @keyframes breathe {
+    0%   { filter: hue-rotate(0deg) brightness(1); }
+    100% { filter: hue-rotate(28deg) brightness(1.18); }
   }
 
-  /* ---- top bar ---- */
   #topbar {
-    position: fixed; top: 0; left: 0; right: 0;
-    z-index: 10;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 24px;
-    background: linear-gradient(180deg, rgba(10,10,26,0.95) 60%, rgba(10,10,26,0) 100%);
-    pointer-events: none;
+    gap: 14px; padding: 16px 22px;
+    background: linear-gradient(180deg, rgba(6,6,15,0.92) 55%, rgba(6,6,15,0));
+    transition: opacity .8s ease, transform .8s ease;
   }
-  #topbar > * { pointer-events: auto; }
+  #topbar.hidden { opacity: 0; transform: translateY(-18px); pointer-events: none; }
 
-  #title {
-    font-family: 'ZCOOL KuaiLe', cursive;
-    font-size: 28px;
-    color: #fff;
-    text-shadow: 0 0 20px rgba(255,140,200,0.6), 0 0 60px rgba(255,140,200,0.3);
-    letter-spacing: 2px;
-  }
-
-  #btn-dir {
-    padding: 10px 22px;
-    border: 2px solid rgba(255,255,255,0.3);
-    border-radius: 30px;
-    background: rgba(255,255,255,0.08);
-    color: #fff;
-    font-size: 15px;
-    cursor: pointer;
-    backdrop-filter: blur(10px);
-    transition: all 0.3s;
-    display: flex; align-items: center; gap: 8px;
-  }
-  #btn-dir:hover {
-    background: rgba(255,255,255,0.18);
-    border-color: rgba(255,140,200,0.6);
-    box-shadow: 0 0 30px rgba(255,140,200,0.25);
-  }
-  #dir-label {
-    max-width: 280px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  #brand {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 26px; letter-spacing: 3px;
+    text-shadow: 0 0 18px rgba(255,107,157,.75), 0 0 52px rgba(255,107,157,.35);
     white-space: nowrap;
-    font-size: 13px;
-    opacity: 0.8;
+  }
+  #brand .dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 14px var(--accent);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.7); } }
+
+  #actions { display: flex; align-items: center; gap: 10px; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 20px;
+    border: 1.5px solid rgba(255,255,255,.24);
+    border-radius: 999px;
+    background: rgba(255,255,255,.07); color: #fff;
+    font-family: inherit; font-size: 15px; cursor: pointer;
+    backdrop-filter: blur(12px);
+    transition: background .25s, border-color .25s, box-shadow .25s, transform .15s;
+    white-space: nowrap;
+  }
+  .btn:hover {
+    background: rgba(255,255,255,.16);
+    border-color: rgba(255,107,157,.7);
+    box-shadow: 0 0 26px rgba(255,107,157,.35);
+  }
+  .btn:active { transform: scale(.96); }
+  .btn.icon { padding: 10px 13px; font-size: 17px; }
+
+  #dirName {
+    max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    opacity: .85; font-size: 13.5px;
   }
 
-  /* ---- bottom hint ---- */
+  #restore {
+    position: fixed; left: 50%; top: 84px; transform: translate(-50%, -14px);
+    z-index: 30; display: none; align-items: center; gap: 14px;
+    padding: 12px 18px; border-radius: 999px;
+    background: rgba(20,20,40,.9);
+    border: 1.5px solid rgba(255,107,157,.5);
+    box-shadow: 0 10px 40px rgba(0,0,0,.55), 0 0 34px rgba(255,107,157,.22);
+    backdrop-filter: blur(14px);
+    opacity: 0; transition: opacity .4s, transform .4s;
+  }
+  #restore.show { display: flex; opacity: 1; transform: translate(-50%, 0); }
+  #restore span { font-size: 14.5px; }
+  #restore b { color: var(--accent); }
+  #restore .btn { padding: 7px 16px; font-size: 14px; }
+
   #hint {
-    position: fixed; bottom: 30px; left: 50%;
-    transform: translateX(-50%);
-    z-index: 10;
-    color: rgba(255,255,255,0.5);
-    font-size: 14px;
-    letter-spacing: 1px;
-    transition: opacity 1.5s;
-    pointer-events: none;
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    z-index: 20; font-size: 14.5px; letter-spacing: 1.5px;
+    color: rgba(255,255,255,.5); text-shadow: 0 2px 12px rgba(0,0,0,.8);
+    transition: opacity 1.6s ease;
+    pointer-events: none; text-align: center; line-height: 1.7;
   }
+  #hint.fade { opacity: 0; }
 
-  /* ---- photo detail modal ---- */
-  #modal-overlay {
-    position: fixed; inset: 0;
-    z-index: 100;
-    background: rgba(0,0,0,0.85);
-    backdrop-filter: blur(15px);
+  #viewer {
+    position: fixed; inset: 0; z-index: 100;
     display: flex; align-items: center; justify-content: center;
-    opacity: 0; pointer-events: none;
-    transition: opacity 0.4s;
+    background: rgba(3,3,10,.86); backdrop-filter: blur(18px);
+    opacity: 0; pointer-events: none; transition: opacity .35s ease;
   }
-  #modal-overlay.active {
-    opacity: 1; pointer-events: auto;
-  }
+  #viewer.open { opacity: 1; pointer-events: auto; }
 
-  #modal-card {
+  #card {
     position: relative;
-    max-width: 85vw; max-height: 85vh;
-    background: rgba(20,20,40,0.95);
-    border-radius: 24px;
-    border: 2px solid rgba(255,255,255,0.15);
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 80px rgba(255,140,200,0.15);
-    padding: 28px;
-    display: flex; flex-direction: column; align-items: center;
-    gap: 18px;
-    transform: scale(0.9);
-    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    display: flex; flex-direction: column; align-items: center; gap: 20px;
+    padding: 26px 30px 30px; border-radius: 30px;
+    background: linear-gradient(160deg, rgba(38,38,66,.96), rgba(18,18,36,.97));
+    border: 1.5px solid rgba(255,255,255,.14);
+    box-shadow: 0 30px 90px rgba(0,0,0,.7), 0 0 100px rgba(255,107,157,.14);
+    transform: scale(.88) translateY(14px);
+    transition: transform .42s cubic-bezier(.2,.9,.3,1.35);
+    max-width: 92vw; max-height: 92vh;
   }
-  #modal-overlay.active #modal-card { transform: scale(1); }
+  #viewer.open #card { transform: scale(1) translateY(0); }
 
-  #modal-close {
-    position: absolute; top: 14px; right: 18px;
-    width: 40px; height: 40px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255,255,255,0.1);
-    color: #fff;
-    font-size: 22px;
-    cursor: pointer;
-    transition: all 0.3s;
+  #closeBtn {
+    position: absolute; top: 14px; right: 16px;
+    width: 40px; height: 40px; border-radius: 50%;
+    border: none; cursor: pointer;
+    background: rgba(255,255,255,.1); color: #fff;
+    font-size: 21px; line-height: 1;
     display: flex; align-items: center; justify-content: center;
+    transition: background .25s, transform .2s;
   }
-  #modal-close:hover { background: rgba(255,80,80,0.4); }
+  #closeBtn:hover { background: rgba(255,70,90,.55); transform: rotate(90deg); }
 
-  #modal-img {
-    max-width: 60vw; max-height: 50vh;
-    border-radius: 16px;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.4);
-    object-fit: contain;
+  #bigWrap {
+    position: relative; border-radius: 22px; overflow: hidden;
+    box-shadow: 0 16px 60px rgba(0,0,0,.55); flex-shrink: 0;
   }
-
-  #modal-name {
-    font-family: 'ZCOOL KuaiLe', cursive;
-    font-size: 32px;
-    color: #fff;
-    text-shadow: 0 0 20px rgba(255,200,100,0.5);
+  #bigImg {
+    display: block; max-width: min(62vw, 620px); max-height: 54vh;
+    object-fit: contain; background: #101024;
   }
 
-  #modal-like-row {
-    display: flex; align-items: center; gap: 14px;
-  }
-  #btn-like {
-    padding: 12px 30px;
-    border: none;
-    border-radius: 30px;
-    background: linear-gradient(135deg, #ff6b9d, #ff4081);
-    color: #fff;
-    font-size: 18px;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 4px 20px rgba(255,64,129,0.4);
-    display: flex; align-items: center; gap: 8px;
-  }
-  #btn-like:hover {
-    transform: scale(1.06);
-    box-shadow: 0 6px 30px rgba(255,64,129,0.6);
-  }
-  #btn-like:active { transform: scale(0.95); }
-  #btn-like.liked {
-    background: linear-gradient(135deg, #ff4081, #e91e63);
-  }
-  #like-count {
-    font-size: 20px;
-    color: rgba(255,255,255,0.8);
-    min-width: 50px;
-    text-align: center;
+  #bigName {
+    font-size: 38px; letter-spacing: 4px; line-height: 1.2;
+    text-shadow: 0 0 24px rgba(255,200,120,.55), 0 4px 18px rgba(0,0,0,.7);
   }
 
-  /* ---- spark particles ---- */
-  .spark {
-    position: fixed;
-    z-index: 200;
-    pointer-events: none;
-    font-size: 24px;
-    animation: sparkUp 0.8s ease-out forwards;
+  #likeRow { display: flex; align-items: center; gap: 16px; }
+
+  #likeBtn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 34px; border: none; border-radius: 999px; cursor: pointer;
+    font-family: inherit; font-size: 19px; color: #fff;
+    background: linear-gradient(135deg, #ff6b9d, #ff2d78);
+    box-shadow: 0 8px 30px rgba(255,45,120,.45);
+    transition: transform .2s, box-shadow .25s;
   }
-  @keyframes sparkUp {
-    0% { opacity: 1; transform: translateY(0) scale(1); }
-    100% { opacity: 0; transform: translateY(-120px) scale(1.5); }
+  #likeBtn:hover { transform: translateY(-2px) scale(1.045); box-shadow: 0 12px 40px rgba(255,45,120,.62); }
+  #likeBtn:active { transform: scale(.95); }
+  #likeBtn.on {
+    background: linear-gradient(135deg, #7b5cff, #5a3ce0);
+    box-shadow: 0 8px 30px rgba(123,92,255,.5);
+  }
+  #likeBtn .heart { font-size: 22px; display: inline-block; }
+  #likeBtn.on .heart { animation: beat .9s ease-in-out infinite; }
+  @keyframes beat { 0%,100% { transform: scale(1); } 45% { transform: scale(1.32); } }
+
+  #likeNum {
+    font-size: 22px; min-width: 92px; text-align: center;
+    color: #ffd0e0; text-shadow: 0 0 20px rgba(255,107,157,.6);
   }
 
-  /* ---- responsive ---- */
-  @media (max-width: 600px) {
-    :root { --cell-size: 80px; --name-size: 11px; }
-    #title { font-size: 20px; }
-    #btn-dir { padding: 8px 14px; font-size: 13px; }
-    #modal-img { max-width: 85vw; max-height: 40vh; }
-    #modal-name { font-size: 24px; }
+  .floaty {
+    position: fixed; z-index: 200; pointer-events: none;
+    font-size: 26px; will-change: transform, opacity;
+    animation: floatUp 1.25s cubic-bezier(.2,.7,.4,1) forwards;
+  }
+  @keyframes floatUp {
+    0%   { opacity: 0; transform: translate(0,0) scale(.5) rotate(0deg); }
+    18%  { opacity: 1; transform: translate(0,-16px) scale(1.25) rotate(8deg); }
+    100% { opacity: 0; transform: translate(var(--dx), -190px) scale(.75) rotate(var(--rot)); }
+  }
+
+  #empty {
+    position: fixed; inset: 0; z-index: 50;
+    display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+    padding: 30px; text-align: center; line-height: 2;
+    background: rgba(6,6,15,.9);
+  }
+  #empty.show { display: flex; }
+  #empty h2 { font-size: 26px; letter-spacing: 2px; }
+  #empty p { font-size: 15px; color: rgba(255,255,255,.66); max-width: 640px; }
+  #empty code {
+    font-family: Consolas, monospace; font-size: 13.5px;
+    background: rgba(255,255,255,.1); padding: 3px 9px; border-radius: 7px; color: #ffd0e0;
+  }
+
+  @media (max-width: 760px) {
+    #brand { font-size: 19px; letter-spacing: 1px; }
+    .btn { padding: 8px 14px; font-size: 13px; }
+    #dirName { display: none; }
+    #bigName { font-size: 26px; }
+    #bigImg { max-width: 84vw; max-height: 44vh; }
+    #likeBtn { padding: 11px 22px; font-size: 16px; }
+    #likeNum { font-size: 18px; min-width: 70px; }
+    #hint { font-size: 12px; }
   }
 </style>
 </head>
 <body>
 
-<canvas id="canvas"></canvas>
+<div id="glow"></div>
+<canvas id="stage"></canvas>
 
 <div id="topbar">
-  <div id="title">🌟 照片墙</div>
-  <button id="btn-dir">
-    📁 <span id="dir-label">选择照片目录</span>
-  </button>
+  <div id="brand"><span class="dot"></span>照片墙</div>
+  <div id="actions">
+    <button class="btn" id="pickBtn">📁 <span>选择照片目录</span></button>
+    <span id="dirName"></span>
+    <button class="btn icon" id="fullBtn" title="全屏 (F)">⛶</button>
+  </div>
 </div>
 
-<div id="hint">🖱️ 拖拽鼠标控制流动方向 · 单击照片查看详情</div>
+<div id="restore">
+  <span>检测到上次使用的目录 <b id="restoreName"></b></span>
+  <button class="btn" id="restoreBtn">点击恢复</button>
+  <button class="btn icon" id="restoreNo" title="忽略">✕</button>
+</div>
 
-<!-- Photo detail modal -->
-<div id="modal-overlay">
-  <div id="modal-card">
-    <button id="modal-close">✕</button>
-    <img id="modal-img" src="" alt="">
-    <div id="modal-name"></div>
-    <div id="modal-like-row">
-      <button id="btn-like">❤️ 点赞</button>
-      <span id="like-count">0 ❤️</span>
+<div id="empty">
+  <h2>📂 这个目录里没有找到照片</h2>
+  <p>
+    请确认目录中包含图片文件（<code>.jpg</code> <code>.png</code> <code>.gif</code> <code>.webp</code> <code>.bmp</code> <code>.avif</code>）。<br>
+    文件名就是展示的姓名，例如 <code>张可爱.jpg</code> 会显示为「张可爱」。
+  </p>
+  <button class="btn" id="emptyPick">重新选择目录</button>
+</div>
+
+<div id="hint">
+  🖱️ 拖拽鼠标控制流动方向 &nbsp;·&nbsp; 单击照片放大查看 &nbsp;·&nbsp; 双击空白处全屏
+</div>
+
+<div id="viewer">
+  <div id="card">
+    <button id="closeBtn" title="关闭 (Esc)">✕</button>
+    <div id="bigWrap"><img id="bigImg" alt=""></div>
+    <div id="bigName"></div>
+    <div id="likeRow">
+      <button id="likeBtn"><span class="heart">🤍</span><span id="likeLabel">点赞</span></button>
+      <div id="likeNum">0</div>
     </div>
   </div>
 </div>
 
 <script>
-// ==================== PhotoWall Application ====================
+/* =====================================================================
+   照片墙 PhotoWall
+   - 蜂窝状(六边形)环形排布，Apple Watch 风格
+   - 无操作时持续随机流动；拖拽鼠标控制流动方向
+   - 单击照片放大查看 + 点赞，数据写入照片目录内 photowall-likes.json
+   - 目录句柄存入 IndexedDB，宣传屏重启后可一键恢复
+   ===================================================================== */
 
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const modalOverlay = document.getElementById('modal-overlay');
-const modalImg = document.getElementById('modal-img');
-const modalName = document.getElementById('modal-name');
-const btnLike = document.getElementById('btn-like');
-const likeCount = document.getElementById('like-count');
-const btnDir = document.getElementById('btn-dir');
-const dirLabel = document.getElementById('dir-label');
-const hint = document.getElementById('hint');
+var LIKES_FILE = 'photowall-likes.json';
+var IMG_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif'];
+var DB_NAME = 'photowall-db';
+var DB_STORE = 'handles';
+var DB_KEY = 'photoDir';
+var HEART_EMOJI = ['❤️', '💖', '💕', '💗', '💝', '✨', '🌟', '💞'];
 
-// ---- State ----
-let photos = [];               // { name, src, likes }
-let cellSize = 110;
-let nameSize = 14;
-const gap = 18;
-let viewX = 0, viewY = 0;     // viewport offset
-let velocityX = 0, velocityY = 0;
-let targetVelX = 0, targetVelY = 0;
-let mouseDown = false;
-let lastMouseX = 0, lastMouseY = 0;
-let dragVelX = 0, dragVelY = 0;
-let lastDragTime = 0;
-let animationId;
-let currentPhotoIndex = -1;
-let likedSet = new Set();     // photos liked this session
-let directoryHandle = null;
-let likesData = {};           // filename -> likes count
-const LIKES_FILENAME = 'photowall-likes.json';
+var canvas = document.getElementById('stage');
+var ctx = canvas.getContext('2d');
+var topbar = document.getElementById('topbar');
+var pickBtn = document.getElementById('pickBtn');
+var fullBtn = document.getElementById('fullBtn');
+var dirName = document.getElementById('dirName');
+var restoreBar = document.getElementById('restore');
+var restoreName = document.getElementById('restoreName');
+var restoreBtn = document.getElementById('restoreBtn');
+var restoreNo = document.getElementById('restoreNo');
+var emptyBox = document.getElementById('empty');
+var emptyPick = document.getElementById('emptyPick');
+var hint = document.getElementById('hint');
+var viewer = document.getElementById('viewer');
+var closeBtn = document.getElementById('closeBtn');
+var bigImg = document.getElementById('bigImg');
+var bigName = document.getElementById('bigName');
+var likeBtn = document.getElementById('likeBtn');
+var likeLabel = document.getElementById('likeLabel');
+var likeNum = document.getElementById('likeNum');
 
-// ---- Responsive sizing ----
-function updateSizes() {
-  const w = window.innerWidth;
-  if (w < 600) { cellSize = 80; nameSize = 11; }
-  else if (w < 1024) { cellSize = 100; nameSize = 13; }
-  else { cellSize = 110; nameSize = 14; }
-  document.documentElement.style.setProperty('--cell-size', cellSize + 'px');
-  document.documentElement.style.setProperty('--name-size', nameSize + 'px');
+var photos = [];
+var layout = [];
+var clusterR = 0;
+var cellSize = 110;
+var spacing = 132;
+var viewX = 0, viewY = 0;
+var velX = 0, velY = 0;
+var goalX = 0, goalY = 0;
+var rot = 0;
+var rotVel = 0.00022;
+var cosR = 1, sinR = 0;
+var wanderA = Math.random() * Math.PI * 2;
+var mouseDown = false;
+var dragVX = 0, dragVY = 0;
+var downX = 0, downY = 0;
+var lastX = 0, lastY = 0;
+var lastT = 0;
+var hoverIdx = -1;
+var openIdx = -1;
+var liked = {};
+var dirHandle = null;
+var pendingHandle = null;
+var likesCache = {};
+var sprites = new Map();
+var idleTimer = null;
+var uiHidden = false;
+var ready = false;
+
+function W() { return window.innerWidth; }
+function H() { return window.innerHeight; }
+
+function resize() {
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.floor(W() * dpr);
+  canvas.height = Math.floor(H() * dpr);
+  canvas.style.width = W() + 'px';
+  canvas.style.height = H() + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  sprites.clear();
+  recomputeLayout();
 }
-updateSizes();
-window.addEventListener('resize', () => {
-  updateSizes();
-  resizeCanvas();
-});
+window.addEventListener('resize', function () { resize(); });
 
-function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
 
-// ---- Generate demo photos ----
-function generateDemoPhotos() {
-  const demoNames = [
-    '张可爱', '李晓明', '王小花', '赵阳光', '陈星星',
-    '刘月亮', '周彩虹', '吴糖果', '郑温暖', '钱多多',
-    '孙甜甜', '杨乐乐', '黄美美', '许欢欢', '林佳佳',
-    '何宝宝', '吕萌萌', '施俏俏', '张晨曦', '孔小鹿',
-    '曹云朵', '严晴天', '华美琳', '金闪闪', '魏星宇',
-    '陶思思', '姜小鱼', '戚小可', '谢如意', '邹幸运',
-  ];
-
-  const colors = [
-    '#FF6B6B','#FF8E53','#FFC048','#4ECDC4','#45B7D1',
-    '#96CEB4','#FFEAA7','#DDA0DD','#98D8C8','#F7DC6F',
-    '#BB8FCE','#85C1E9','#F8C471','#82E0AA','#F1948A',
-    '#AED6F1','#D7BDE2','#A3E4D7','#FAD7A0','#F5B7B1',
-    '#7FB3D8','#F0B27A','#73C6B6','#D2B4DE','#E59866',
-    '#5499C7','#FADBD8','#A9DFBF','#F9E79F','#D5DBDF',
-  ];
-
-  photos = demoNames.map((name, i) => ({
-    name,
-    src: generateAvatarCanvas(name, colors[i % colors.length]),
-    likes: likesData[name] || 0,
-    isDemo: true,
-  }));
-}
-
-function generateAvatarCanvas(name, bgColor) {
-  const size = 200;
-  const c = document.createElement('canvas');
-  c.width = size; c.height = size;
-  const cx = c.getContext('2d');
-
-  // Background circle
-  cx.beginPath();
-  cx.arc(size/2, size/2, size/2 - 4, 0, Math.PI * 2);
-  cx.fillStyle = bgColor;
-  cx.fill();
-
-  // Subtle gradient overlay
-  const grad = cx.createRadialGradient(size*0.35, size*0.35, 0, size/2, size/2, size/2);
-  grad.addColorStop(0, 'rgba(255,255,255,0.3)');
-  grad.addColorStop(1, 'rgba(0,0,0,0.1)');
-  cx.fillStyle = grad;
-  cx.fill();
-
-  // Emoji based on name hash
-  const emojis = ['😊','🌟','💖','🎀','🌸','✨','🍬','🌈','💫','🦋','🎨','🍭','💎','🌺','⭐'];
-  const hash = name.split('').reduce((a,c) => a + c.charCodeAt(0), 0);
-  const emoji = emojis[hash % emojis.length];
-  cx.font = '60px serif';
-  cx.textAlign = 'center';
-  cx.textBaseline = 'middle';
-  cx.fillText(emoji, size/2, size/2 - 8);
-
-  // Initial letter at bottom
-  const firstChar = name.charAt(0);
-  cx.font = 'bold 28px "ZCOOL KuaiLe", cursive';
-  cx.fillStyle = 'rgba(255,255,255,0.9)';
-  cx.fillText(firstChar, size/2, size/2 + 52);
-
-  return c.toDataURL('image/png');
+function fitText(g, text, maxW) {
+  if (g.measureText(text).width <= maxW) return text;
+  var t = text;
+  while (t.length > 1 && g.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
 }
 
-// ---- Hexagonal grid layout ----
-function getHexPosition(index, total) {
-  // Arrange in a roughly circular honeycomb pattern
-  // Use spiral / ring-based layout
-  if (total === 0) return { x: 0, y: 0 };
-  if (index === 0) return { x: 0, y: 0 };
+function baseName(filename) {
+  var i = filename.lastIndexOf('.');
+  return i > 0 ? filename.slice(0, i) : filename;
+}
 
-  let ring = 0;
-  let countInPrevRings = 1; // center
-  while (true) {
-    ring++;
-    const perRing = ring * 6;
-    if (index < countInPrevRings + perRing) break;
-    countInPrevRings += perRing;
+function isImage(name) {
+  var low = name.toLowerCase();
+  for (var i = 0; i < IMG_EXTS.length; i++) {
+    if (low.endsWith(IMG_EXTS[i])) return true;
   }
-
-  const idxInRing = index - countInPrevRings;
-  const segment = Math.floor(idxInRing / ring); // 0-5
-  const posInSegment = idxInRing % ring;
-
-  const angle60 = Math.PI / 3;
-  const startAngle = segment * angle60 - Math.PI / 6;
-
-  // Position in fractional hex coordinates
-  const frac = posInSegment / ring;
-
-  const cosA = Math.cos(startAngle);
-  const sinA = Math.sin(startAngle);
-  const cosB = Math.cos(startAngle + angle60);
-  const sinB = Math.sin(startAngle + angle60);
-
-  const hx = ring * cosA + (ring * cosB - ring * cosA) * frac;
-  const hy = ring * sinA + (ring * sinB - ring * sinA) * frac;
-
-  const spacing = cellSize + gap;
-  const x = hx * spacing;
-  const y = hy * spacing * 0.866; // sqrt(3)/2
-
-  return { x, y };
+  return false;
 }
 
-// ---- Rendering ----
-function getPhotoScreenPos(photo, index) {
-  const hex = getHexPosition(index, photos.length);
-  return {
-    sx: canvas.width / 2 + hex.x + viewX,
-    sy: canvas.height / 2 + hex.y + viewY,
-  };
-}
-
-function render() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Draw subtle background particles
-  const t = performance.now() * 0.001;
-  ctx.fillStyle = 'rgba(255,255,255,0.03)';
-  for (let i = 0; i < 40; i++) {
-    const px = ((i * 137.5 + t * 20) % canvas.width);
-    const py = ((i * 251.3 + t * 15) % canvas.height);
-    ctx.beginPath();
-    ctx.arc(px, py, 1.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const halfSize = cellSize / 2;
-
-  for (let i = 0; i < photos.length; i++) {
-    const photo = photos[i];
-    const pos = getPhotoScreenPos(photo, i);
-    const { sx, sy } = pos;
-
-    // Skip off-screen photos (with margin)
-    if (sx < -cellSize*2 || sx > canvas.width + cellSize*2 ||
-        sy < -cellSize*2 || sy > canvas.height + cellSize*2) continue;
-
-    // Glow ring
-    const isHovered = (i === currentPhotoIndex);
-    if (isHovered) {
-      ctx.save();
-      ctx.shadowColor = 'rgba(255,200,100,0.7)';
-      ctx.shadowBlur = 30;
-    }
-
-    // Outer ring
-    ctx.beginPath();
-    ctx.arc(sx, sy, halfSize + 6, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    if (isHovered) ctx.restore();
-
-    // Clip circle
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(sx, sy, halfSize, 0, Math.PI * 2);
-    ctx.clip();
-
-    // Draw photo image
-    const img = imageCache.get(photo.src);
-    if (img) {
-      const scale = Math.max((cellSize) / img.width, (cellSize) / img.height);
-      const dw = img.width * scale;
-      const dh = img.height * scale;
-      ctx.drawImage(img, sx - dw/2, sy - dh/2, dw, dh);
-    } else {
-      // Placeholder while loading
-      ctx.fillStyle = '#333';
-      ctx.fill();
-      loadImage(photo.src);
-    }
-
-    ctx.restore();
-
-    // Border circle
-    ctx.beginPath();
-    ctx.arc(sx, sy, halfSize, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-
-    // Inner glow
-    ctx.beginPath();
-    ctx.arc(sx, sy, halfSize, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.lineWidth = 6;
-    ctx.stroke();
-
-    // Name label
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    const nameY = sy + halfSize + 18;
-    ctx.font = `bold ${nameSize}px "ZCOOL KuaiLe", cursive`;
-    ctx.textAlign = 'center';
-    const nameWidth = ctx.measureText(photo.name).width;
-    const labelPadX = 12;
-    const labelPadY = 4;
-    const labelH = nameSize + labelPadY * 2;
-    roundRect(ctx, sx - nameWidth/2 - labelPadX, nameY - nameSize/2 - labelPadY,
-              nameWidth + labelPadX*2, labelH, labelH/2);
-    ctx.fill();
-
-    ctx.fillStyle = '#fff';
-    ctx.fillText(photo.name, sx, nameY);
-
-    // Like count mini badge
-    if (photo.likes > 0) {
-      const badgeX = sx + halfSize - 6;
-      const badgeY = sy - halfSize + 6;
-      ctx.fillStyle = 'rgba(255,64,129,0.9)';
-      ctx.beginPath();
-      ctx.arc(badgeX, badgeY, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(photo.likes > 99 ? '99+' : photo.likes, badgeX, badgeY);
-    }
-  }
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
-}
-
-// ---- Image cache ----
-const imageCache = new Map();
-function loadImage(src) {
-  if (imageCache.has(src)) return;
-  const img = new Image();
-  img.onload = () => { imageCache.set(src, img); };
-  img.src = src;
-}
-
-// ---- Animation loop ----
-function animate(timestamp) {
-  // Smooth velocity toward target
-  const lerp = 0.08;
-  velocityX += (targetVelX - velocityX) * lerp;
-  velocityY += (targetVelY - velocityY) * lerp;
-
-  // Apply velocity
-  viewX += velocityX;
-  viewY += velocityY;
-
-  // Damping
-  velocityX *= 0.998;
-  velocityY *= 0.998;
-
-  // Random drift when idle
-  if (!mouseDown) {
-    const driftStrength = 0.03;
-    targetVelX += (Math.random() - 0.5) * driftStrength;
-    targetVelY += (Math.random() - 0.5) * driftStrength;
-    // Clamp random drift
-    const maxDrift = 1.5;
-    targetVelX = Math.max(-maxDrift, Math.min(maxDrift, targetVelX));
-    targetVelY = Math.max(-maxDrift, Math.min(maxDrift, targetVelY));
-  }
-
-  render();
-  animationId = requestAnimationFrame(animate);
-}
-
-// ---- Mouse / Touch interaction ----
-canvas.addEventListener('mousedown', (e) => {
-  mouseDown = true;
-  lastMouseX = e.clientX;
-  lastMouseY = e.clientY;
-  lastDragTime = performance.now();
-  targetVelX = 0;
-  targetVelY = 0;
-  document.body.classList.add('dragging');
-});
-
-window.addEventListener('mousemove', (e) => {
-  if (!mouseDown) {
-    // Hover detection
-    const mx = e.clientX;
-    const my = e.clientY;
-    let found = -1;
-    for (let i = photos.length - 1; i >= 0; i--) {
-      const pos = getPhotoScreenPos(photos[i], i);
-      const dx = mx - pos.sx;
-      const dy = my - pos.sy;
-      if (dx*dx + dy*dy < (cellSize/2 + 8) * (cellSize/2 + 8)) {
-        found = i; break;
+/* ---------- 蜂窝几何：轴向六边形坐标 + 环形螺旋 ---------- */
+function hexRings(rings) {
+  var cells = [[0, 0]];
+  var dirs = [[-1, 1], [-1, 0], [0, -1], [1, -1], [1, 0], [0, 1]];
+  for (var n = 1; n <= rings; n++) {
+    var q = n, r = 0;
+    for (var d = 0; d < 6; d++) {
+      for (var i = 0; i < n; i++) {
+        cells.push([q, r]);
+        q += dirs[d][0];
+        r += dirs[d][1];
       }
     }
-    if (found !== currentPhotoIndex) {
-      currentPhotoIndex = found;
-      canvas.style.cursor = found >= 0 ? 'pointer' : 'grab';
+  }
+  return cells;
+}
+
+function recomputeLayout() {
+  var n = photos.length;
+  layout = [];
+  clusterR = 0;
+  if (n === 0) return;
+
+  var rings = 0;
+  while (1 + 3 * rings * (rings + 1) < n) rings++;
+
+  var minDim = Math.min(W(), H());
+  var want = minDim * 0.40;
+  var s = want / Math.max(rings, 0.85);
+  s = clamp(s, 104, 208);
+  spacing = s;
+  cellSize = Math.round(s * 0.78);
+
+  var cells = hexRings(rings);
+  for (var k = 0; k < n; k++) {
+    var c = cells[k];
+    var x = spacing * (c[0] + c[1] * 0.5);
+    var y = spacing * 0.8660254 * c[1];
+    layout.push({ x: x, y: y });
+    var dist = Math.sqrt(x * x + y * y);
+    if (dist > clusterR) clusterR = dist;
+  }
+  sprites.clear();
+}
+
+/* ---------- 精灵图预渲染 ---------- */
+function makeSprite(photo) {
+  var key = photo.id + '@' + cellSize;
+  var hit = sprites.get(key);
+  if (hit) return hit;
+  if (!photo.img || !photo.img.complete || photo.img.naturalWidth === 0) return null;
+
+  var pad = 16;
+  var side = cellSize + pad * 2;
+  var cv = document.createElement('canvas');
+  cv.width = side;
+  cv.height = side;
+  var g = cv.getContext('2d');
+  var cx = side / 2, cy = side / 2, r = cellSize / 2;
+
+  g.beginPath();
+  g.arc(cx, cy, r + 5, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(255,255,255,0.07)';
+  g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.20)';
+  g.lineWidth = 1.6;
+  g.stroke();
+
+  g.save();
+  g.beginPath();
+  g.arc(cx, cy, r, 0, Math.PI * 2);
+  g.clip();
+
+  var img = photo.img;
+  var sc = Math.max((r * 2) / img.naturalWidth, (r * 2) / img.naturalHeight);
+  var dw = img.naturalWidth * sc;
+  var dh = img.naturalHeight * sc;
+  g.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
+
+  var grd = g.createLinearGradient(0, cy + r * 0.08, 0, cy + r);
+  grd.addColorStop(0, 'rgba(0,0,0,0)');
+  grd.addColorStop(1, 'rgba(0,0,0,0.78)');
+  g.fillStyle = grd;
+  g.fillRect(cx - r, cy + r * 0.08, r * 2, r * 0.92);
+
+  var grd2 = g.createLinearGradient(0, cy - r, 0, cy - r * 0.35);
+  grd2.addColorStop(0, 'rgba(255,255,255,0.20)');
+  grd2.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd2;
+  g.fillRect(cx - r, cy - r, r * 2, r * 0.65);
+  g.restore();
+
+  var fs = Math.max(12, Math.round(cellSize * 0.145));
+  g.font = 'bold ' + fs + 'px "ZCOOL KuaiLe", "YouYuan", "幼圆", "Microsoft YaHei", sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,0.95)';
+  g.shadowBlur = 5;
+  g.fillStyle = '#ffffff';
+  g.fillText(fitText(g, photo.name, cellSize - 14), cx, cy + r - fs * 1.0);
+  g.shadowBlur = 0;
+
+  g.beginPath();
+  g.arc(cx, cy, r, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(255,255,255,0.42)';
+  g.lineWidth = 2.4;
+  g.stroke();
+
+  g.beginPath();
+  g.arc(cx, cy, r - 1.6, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(0,0,0,0.25)';
+  g.lineWidth = 1.2;
+  g.stroke();
+
+  sprites.set(key, cv);
+  return cv;
+}
+
+/* ---------- 动画 ---------- */
+function tick(now) {
+  var t = now / 1000;
+  var dt = lastT ? Math.min((now - lastT) / 16.667, 3) : 1;
+  lastT = now;
+
+  if (openIdx < 0) {
+    wanderA += (Math.random() - 0.5) * 0.20 * dt;
+    goalX += Math.cos(wanderA) * 0.030 * dt;
+    goalY += Math.sin(wanderA) * 0.030 * dt;
+
+    var maxX = Math.max(W() * 0.05, clusterR - W() * 0.20);
+    var maxY = Math.max(H() * 0.05, clusterR - H() * 0.20);
+    if (viewX > maxX) goalX -= (viewX - maxX) * 0.0028 * dt;
+    if (viewX < -maxX) goalX += (-maxX - viewX) * 0.0028 * dt;
+    if (viewY > maxY) goalY -= (viewY - maxY) * 0.0028 * dt;
+    if (viewY < -maxY) goalY += (-maxY - viewY) * 0.0028 * dt;
+
+    var damp = Math.pow(0.986, dt);
+    goalX = clamp(goalX * damp, -2.4, 2.4);
+    goalY = clamp(goalY * damp, -2.4, 2.4);
+
+    var ease = Math.min(1, 0.05 * dt);
+    velX += (goalX - velX) * ease;
+    velY += (goalY - velY) * ease;
+
+    viewX += velX * dt;
+    viewY += velY * dt;
+
+    rot += rotVel * dt;
+    if (rot > Math.PI * 2) rot -= Math.PI * 2;
+  }
+
+  cosR = Math.cos(rot);
+  sinR = Math.sin(rot);
+
+  render(t);
+  requestAnimationFrame(tick);
+}
+
+function worldToScreen(i, t) {
+  var L = layout[i];
+  var x = L.x * cosR - L.y * sinR;
+  var y = L.x * sinR + L.y * cosR;
+  var ph = i * 1.7;
+  x += Math.sin(t * 0.62 + ph) * 5.0;
+  y += Math.cos(t * 0.51 + ph * 1.3) * 5.0;
+  return { x: W() / 2 + x + viewX, y: H() / 2 + y + viewY };
+}
+
+function render(t) {
+  ctx.clearRect(0, 0, W(), H());
+
+  ctx.fillStyle = 'rgba(255,255,255,0.035)';
+  for (var s = 0; s < 46; s++) {
+    var px = (s * 137.51 + t * 13) % W();
+    var py = (s * 251.73 + t * 9) % H();
+    var rr = 1 + (s % 3) * 0.6;
+    ctx.beginPath();
+    ctx.arc(px, py, rr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  var n = photos.length;
+  var margin = cellSize * 1.4;
+
+  for (var i = 0; i < n; i++) {
+    var pos = worldToScreen(i, t);
+    if (pos.x < -margin || pos.x > W() + margin || pos.y < -margin || pos.y > H() + margin) continue;
+
+    var sp = makeSprite(photos[i]);
+    if (!sp) {
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, cellSize / 2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      ctx.fill();
+      continue;
+    }
+
+    var scale = (i === hoverIdx) ? 1.10 : 1.0;
+    var w = sp.width * scale;
+    var h = sp.height * scale;
+
+    if (i === hoverIdx) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,107,157,0.85)';
+      ctx.shadowBlur = 34;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, (cellSize / 2 + 4) * scale, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,107,157,0.16)';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.drawImage(sp, pos.x - w / 2, pos.y - h / 2, w, h);
+
+    var likes = photos[i].likes;
+    if (likes > 0) {
+      var bx = pos.x + (cellSize / 2) * scale - 6;
+      var by = pos.y - (cellSize / 2) * scale + 6;
+      ctx.beginPath();
+      ctx.arc(bx, by, 15, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,45,120,0.94)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(likes > 999 ? '999+' : String(likes), bx, by);
+    }
+  }
+}
+
+/* ---------- 交互 ---------- */
+function hitTest(mx, my, t) {
+  var best = -1;
+  var bestD = Infinity;
+  var rad = cellSize / 2 + 6;
+  for (var i = photos.length - 1; i >= 0; i--) {
+    var p = worldToScreen(i, t);
+    var dx = mx - p.x;
+    var dy = my - p.y;
+    var d2 = dx * dx + dy * dy;
+    if (d2 < rad * rad && d2 < bestD) { bestD = d2; best = i; }
+  }
+  return best;
+}
+
+function onDown(x, y) {
+  mouseDown = true;
+  downX = lastX = x;
+  downY = lastY = y;
+  dragVX = dragVY = 0;
+  goalX = goalY = 0;
+  document.body.classList.add('dragging');
+  noteActivity();
+}
+
+function onMove(x, y) {
+  if (!mouseDown) {
+    var idx = hitTest(x, y, performance.now() / 1000);
+    if (idx !== hoverIdx) {
+      hoverIdx = idx;
+      canvas.style.cursor = idx >= 0 ? 'pointer' : 'grab';
     }
     return;
   }
-
-  const dx = e.clientX - lastMouseX;
-  const dy = e.clientY - lastMouseY;
+  var dx = x - lastX;
+  var dy = y - lastY;
   viewX += dx;
   viewY += dy;
+  dragVX = dx;
+  dragVY = dy;
+  lastX = x;
+  lastY = y;
+}
 
-  const now = performance.now();
-  const dt = Math.max(now - lastDragTime, 1);
-  dragVelX = dx / dt * 16; // normalize to ~60fps
-  dragVelY = dy / dt * 16;
-  lastDragTime = now;
-
-  lastMouseX = e.clientX;
-  lastMouseY = e.clientY;
-});
-
-window.addEventListener('mouseup', (e) => {
+function onUp(x, y) {
   if (!mouseDown) return;
   mouseDown = false;
   document.body.classList.remove('dragging');
 
-  // Apply inertia from drag
-  targetVelX = dragVelX * 3;
-  targetVelY = dragVelY * 3;
-  dragVelX = 0;
-  dragVelY = 0;
-
-  // If it was a click (small movement), check for photo tap
-  const clickDx = Math.abs(e.clientX - lastMouseX);
-  const clickDy = Math.abs(e.clientY - lastMouseY);
-  if (clickDx < 4 && clickDy < 4 && currentPhotoIndex >= 0) {
-    openPhotoDetail(currentPhotoIndex);
+  var moved = Math.abs(x - downX) + Math.abs(y - downY);
+  if (moved < 7) {
+    var idx = hitTest(x, y, performance.now() / 1000);
+    if (idx >= 0) {
+      openViewer(idx);
+      dragVX = dragVY = 0;
+      return;
+    }
   }
 
-  // Hide hint after first interaction
-  if (hint.style.opacity !== '0') {
-    hint.style.transition = 'opacity 1.5s';
-    hint.style.opacity = '0';
-  }
-});
+  goalX = clamp(dragVX * 0.34, -16, 16);
+  goalY = clamp(dragVY * 0.34, -16, 16);
+  dragVX = dragVY = 0;
+  noteActivity();
+}
 
-// Touch support
-canvas.addEventListener('touchstart', (e) => {
+canvas.addEventListener('mousedown', function (e) { onDown(e.clientX, e.clientY); });
+window.addEventListener('mousemove', function (e) { onMove(e.clientX, e.clientY); });
+window.addEventListener('mouseup', function (e) { onUp(e.clientX, e.clientY); });
+
+canvas.addEventListener('touchstart', function (e) {
   if (e.touches.length === 1) {
-    mouseDown = true;
-    lastMouseX = e.touches[0].clientX;
-    lastMouseY = e.touches[0].clientY;
-    lastDragTime = performance.now();
-    targetVelX = 0; targetVelY = 0;
-    document.body.classList.add('dragging');
+    onDown(e.touches[0].clientX, e.touches[0].clientY);
     e.preventDefault();
   }
 }, { passive: false });
 
-canvas.addEventListener('touchmove', (e) => {
-  if (!mouseDown || e.touches.length !== 1) return;
-  const dx = e.touches[0].clientX - lastMouseX;
-  const dy = e.touches[0].clientY - lastMouseY;
-  viewX += dx;
-  viewY += dy;
-  const now = performance.now();
-  const dt = Math.max(now - lastDragTime, 1);
-  dragVelX = dx / dt * 16;
-  dragVelY = dy / dt * 16;
-  lastDragTime = now;
-  lastMouseX = e.touches[0].clientX;
-  lastMouseY = e.touches[0].clientY;
-  e.preventDefault();
+canvas.addEventListener('touchmove', function (e) {
+  if (mouseDown && e.touches.length === 1) {
+    onMove(e.touches[0].clientX, e.touches[0].clientY);
+    e.preventDefault();
+  }
 }, { passive: false });
 
-canvas.addEventListener('touchend', (e) => {
-  if (!mouseDown) return;
-  mouseDown = false;
-  document.body.classList.remove('dragging');
-  targetVelX = dragVelX * 3;
-  targetVelY = dragVelY * 3;
-  dragVelX = 0; dragVelY = 0;
-
-  const clickDx = Math.abs((e.changedTouches[0]?.clientX || 0) - lastMouseX);
-  const clickDy = Math.abs((e.changedTouches[0]?.clientY || 0) - lastMouseY);
-  if (clickDx < 10 && clickDy < 10 && currentPhotoIndex >= 0) {
-    openPhotoDetail(currentPhotoIndex);
-  }
-  if (hint.style.opacity !== '0') {
-    hint.style.transition = 'opacity 1.5s';
-    hint.style.opacity = '0';
-  }
+canvas.addEventListener('touchend', function (e) {
+  var t0 = e.changedTouches[0];
+  if (t0) onUp(t0.clientX, t0.clientY);
 });
 
-// ---- Wheel zoom (optional) ----
-canvas.addEventListener('wheel', (e) => {
+canvas.addEventListener('wheel', function (e) {
   e.preventDefault();
-  targetVelX -= e.deltaX * 0.3;
-  targetVelY -= e.deltaY * 0.3;
+  goalX = clamp(goalX - e.deltaX * 0.22, -14, 14);
+  goalY = clamp(goalY - e.deltaY * 0.22, -14, 14);
+  noteActivity();
 }, { passive: false });
 
-// ---- Photo detail modal ----
-function openPhotoDetail(index) {
-  const photo = photos[index];
-  if (!photo) return;
-  currentPhotoIndex = index;
-  modalImg.src = photo.src;
-  modalName.textContent = photo.name;
-  updateLikeUI(photo);
-  modalOverlay.classList.add('active');
-
-  // Pause motion
-  targetVelX = 0;
-  targetVelY = 0;
-  velocityX = 0;
-  velocityY = 0;
-}
-
-function closeModal() {
-  modalOverlay.classList.remove('active');
-  currentPhotoIndex = -1;
-}
-
-document.getElementById('modal-close').addEventListener('click', closeModal);
-modalOverlay.addEventListener('click', (e) => {
-  if (e.target === modalOverlay) closeModal();
+canvas.addEventListener('dblclick', function (e) {
+  var idx = hitTest(e.clientX, e.clientY, performance.now() / 1000);
+  if (idx < 0) toggleFull();
 });
 
-// ---- Like system ----
-function updateLikeUI(photo) {
-  const isLiked = likedSet.has(photo.name);
-  btnLike.textContent = isLiked ? '❤️ 已点赞' : '🤍 点赞';
-  btnLike.classList.toggle('liked', isLiked);
-  likeCount.textContent = `${photo.likes} ❤️`;
+/* ---------- 放大查看 + 点赞 ---------- */
+function openViewer(i) {
+  openIdx = i;
+  var p = photos[i];
+  bigImg.src = p.src;
+  bigName.textContent = p.name;
+  refreshLikeUI(p);
+  viewer.classList.add('open');
+  goalX = goalY = velX = velY = 0;
+  noteActivity();
 }
 
-btnLike.addEventListener('click', async () => {
-  if (currentPhotoIndex < 0 || currentPhotoIndex >= photos.length) return;
-  const photo = photos[currentPhotoIndex];
+function closeViewer() {
+  viewer.classList.remove('open');
+  openIdx = -1;
+  noteActivity();
+}
 
-  if (likedSet.has(photo.name)) {
-    // Unlike
-    likedSet.delete(photo.name);
-    photo.likes = Math.max(0, photo.likes - 1);
+function refreshLikeUI(p) {
+  var isOn = !!liked[p.name];
+  likeBtn.classList.toggle('on', isOn);
+  likeBtn.querySelector('.heart').textContent = isOn ? '❤️' : '🤍';
+  likeLabel.textContent = isOn ? '已点赞' : '点赞';
+  likeNum.textContent = p.likes + ' ❤️';
+}
+
+function burstHearts() {
+  var rect = likeBtn.getBoundingClientRect();
+  var ox = rect.left + rect.width / 2;
+  var oy = rect.top;
+  for (var i = 0; i < 14; i++) {
+    var el = document.createElement('div');
+    el.className = 'floaty';
+    el.textContent = HEART_EMOJI[Math.floor(Math.random() * HEART_EMOJI.length)];
+    el.style.left = (ox + (Math.random() - 0.5) * 90) + 'px';
+    el.style.top = (oy + (Math.random() - 0.5) * 18) + 'px';
+    el.style.setProperty('--dx', ((Math.random() - 0.5) * 130).toFixed(0) + 'px');
+    el.style.setProperty('--rot', ((Math.random() - 0.5) * 90).toFixed(0) + 'deg');
+    el.style.animationDelay = (Math.random() * 0.22).toFixed(2) + 's';
+    document.body.appendChild(el);
+    (function (node) { setTimeout(function () { node.remove(); }, 1700); })(el);
+  }
+}
+
+likeBtn.addEventListener('click', function () {
+  if (openIdx < 0) return;
+  var p = photos[openIdx];
+  if (liked[p.name]) {
+    liked[p.name] = false;
+    p.likes = Math.max(0, p.likes - 1);
   } else {
-    // Like
-    likedSet.add(photo.name);
-    photo.likes++;
-    spawnSparks();
+    liked[p.name] = true;
+    p.likes += 1;
+    burstHearts();
   }
-
-  updateLikeUI(photo);
-  await saveLikes();
+  refreshLikeUI(p);
+  saveLikes();
+  noteActivity();
 });
 
-function spawnSparks() {
-  const emojis = ['❤️','💖','💕','💗','✨','🌟','💝'];
-  for (let i = 0; i < 12; i++) {
-    const spark = document.createElement('div');
-    spark.className = 'spark';
-    spark.textContent = emojis[Math.floor(Math.random() * emojis.length)];
-    spark.style.left = (40 + Math.random() * 20) + '%';
-    spark.style.top = (40 + Math.random() * 10) + '%';
-    spark.style.animationDuration = (0.6 + Math.random() * 0.8) + 's';
-    spark.style.animationDelay = Math.random() * 0.15 + 's';
-    document.body.appendChild(spark);
-    setTimeout(() => spark.remove(), 1200);
+closeBtn.addEventListener('click', closeViewer);
+viewer.addEventListener('click', function (e) { if (e.target === viewer) closeViewer(); });
+
+/* ---------- 点赞持久化 ---------- */
+function collectLikes() {
+  var data = {};
+  for (var i = 0; i < photos.length; i++) {
+    if (photos[i].likes > 0) data[photos[i].name] = photos[i].likes;
   }
+  return data;
 }
 
-// ---- Persistence ----
 async function saveLikes() {
-  const data = {};
-  for (const p of photos) {
-    if (p.likes > 0) data[p.name] = p.likes;
-  }
-  likesData = data;
+  var data = collectLikes();
+  likesCache = data;
 
-  if (directoryHandle && !photos[0]?.isDemo) {
-    try {
-      const fileHandle = await directoryHandle.getFileHandle(LIKES_FILENAME, { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(JSON.stringify(data, null, 2));
-      await writable.close();
-    } catch (err) {
-      console.warn('Save likes to directory failed, using localStorage fallback:', err);
-      localStorage.setItem('photowall-likes', JSON.stringify(data));
-    }
-  } else {
-    localStorage.setItem('photowall-likes', JSON.stringify(data));
+  if (!dirHandle) {
+    try { localStorage.setItem('photowall-likes', JSON.stringify(data)); } catch (e) {}
+    return;
+  }
+
+  try {
+    var fh = await dirHandle.getFileHandle(LIKES_FILE, { create: true });
+    var w = await fh.createWritable();
+    await w.write(JSON.stringify(data, null, 2));
+    await w.close();
+  } catch (err) {
+    console.warn('写入点赞文件失败，回退到 localStorage：', err);
+    try { localStorage.setItem('photowall-likes', JSON.stringify(data)); } catch (e) {}
   }
 }
 
-async function loadLikesFromDirectory() {
-  if (!directoryHandle) return {};
+async function readLikes(handle) {
   try {
-    const fileHandle = await directoryHandle.getFileHandle(LIKES_FILENAME);
-    const file = await fileHandle.getFile();
-    const text = await file.text();
-    return JSON.parse(text);
-  } catch {
+    var fh = await handle.getFileHandle(LIKES_FILE);
+    var file = await fh.getFile();
+    var txt = await file.text();
+    var obj = JSON.parse(txt);
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch (e) {
     return {};
   }
 }
 
-// ---- Directory selection ----
-btnDir.addEventListener('click', async () => {
+/* ---------- IndexedDB 句柄持久化 ---------- */
+function idbOpen() {
+  return new Promise(function (res, rej) {
+    var req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = function () {
+      if (!req.result.objectStoreNames.contains(DB_STORE)) req.result.createObjectStore(DB_STORE);
+    };
+    req.onsuccess = function () { res(req.result); };
+    req.onerror = function () { rej(req.error); };
+  });
+}
+
+async function idbPut(key, val) {
   try {
-    // Check if File System Access API is available
-    if (!('showDirectoryPicker' in window)) {
-      alert('⚠️ 您的浏览器不支持文件系统访问API。请使用 Chrome 或 Edge 浏览器打开此页面。\n\n当前将使用内置演示照片。');
-      return;
-    }
-
-    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-    directoryHandle = handle;
-    await loadPhotosFromDirectory(handle);
-    dirLabel.textContent = handle.name;
-    dirLabel.title = handle.name;
-
-    // Save handle reference for next time
-    // (IndexedDB persistence of file handles is complex; we use a simpler approach)
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      console.error('Directory selection failed:', err);
-    }
-  }
-});
-
-async function loadPhotosFromDirectory(handle) {
-  const imageExtensions = ['.jpg','.jpeg','.png','.gif','.webp','.bmp','.svg'];
-  const newPhotos = [];
-
-  // Load likes data
-  likesData = await loadLikesFromDirectory();
-
-  for await (const [name, fileHandle] of handle.entries()) {
-    if (fileHandle.kind !== 'file') continue;
-    const ext = '.' + name.split('.').pop().toLowerCase();
-    if (!imageExtensions.includes(ext)) continue;
-
-    const file = await fileHandle.getFile();
-    const url = URL.createObjectURL(file);
-    const baseName = name.substring(0, name.lastIndexOf('.')) || name;
-
-    newPhotos.push({
-      name: baseName,
-      src: url,
-      likes: likesData[baseName] || 0,
-      isDemo: false,
-      fileHandle,
+    var db = await idbOpen();
+    await new Promise(function (res, rej) {
+      var tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(val, key);
+      tx.oncomplete = res;
+      tx.onerror = function () { rej(tx.error); };
     });
+    return true;
+  } catch (e) { return false; }
+}
+
+async function idbGet(key) {
+  try {
+    var db = await idbOpen();
+    return await new Promise(function (res, rej) {
+      var tx = db.transaction(DB_STORE, 'readonly');
+      var r = tx.objectStore(DB_STORE).get(key);
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error); };
+    });
+  } catch (e) { return null; }
+}
+
+/* ---------- 目录加载 ---------- */
+async function useDirectory(handle) {
+  dirHandle = handle;
+  emptyBox.classList.remove('show');
+
+  likesCache = await readLikes(handle);
+
+  var found = [];
+  for await (var entry of handle.values()) {
+    if (entry.kind !== 'file') continue;
+    if (entry.name === LIKES_FILE) continue;
+    if (!isImage(entry.name)) continue;
+    found.push(entry);
   }
 
-  if (newPhotos.length === 0) {
-    alert('所选目录中没有找到照片文件。请选择一个包含 .jpg/.png/.gif/.webp 等图片文件的目录。');
+  if (found.length === 0) {
+    photos = [];
+    layout = [];
+    recomputeLayout();
+    emptyBox.classList.add('show');
+    dirName.textContent = handle.name + '（空）';
+    idbPut(DB_KEY, handle);
     return;
   }
 
-  photos = newPhotos;
-  likedSet.clear();
-  viewX = 0; viewY = 0;
-  velocityX = 0; velocityY = 0;
-  targetVelX = 0; targetVelY = 0;
+  for (var j = 0; j < photos.length; j++) {
+    if (!photos[j].isDemo && photos[j].src) {
+      try { URL.revokeObjectURL(photos[j].src); } catch (e) {}
+    }
+  }
 
-  // Preload images
-  for (const p of photos) loadImage(p.src);
+  found.sort(function (a, b) { return a.name.localeCompare(b.name, 'zh-Hans-CN'); });
 
-  dirLabel.textContent = `${handle.name} (${photos.length}张)`;
-  hint.style.opacity = '1';
+  photos = [];
+  var id = 0;
+  for (var k = 0; k < found.length; k++) {
+    var fh = found[k];
+    var f = await fh.getFile();
+    var nm = baseName(f.name);
+    var ph = {
+      id: 'f' + (id++),
+      name: nm,
+      src: URL.createObjectURL(f),
+      img: null,
+      likes: likesCache[nm] || 0,
+      isDemo: false,
+      fileHandle: fh
+    };
+    photos.push(ph);
+    loadImg(ph);
+  }
+
+  liked = {};
+  sprites.clear();
+  recomputeLayout();
+  viewX = viewY = velX = velY = goalX = goalY = 0;
+  rot = 0;
+
+  dirName.textContent = handle.name + ' · ' + photos.length + ' 张';
+  dirName.title = handle.name;
+  restoreBar.classList.remove('show');
+
+  await idbPut(DB_KEY, handle);
+  noteActivity();
 }
 
-// ---- Keyboard shortcuts ----
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (modalOverlay.classList.contains('active')) {
-      closeModal();
+function loadImg(ph) {
+  var img = new Image();
+  img.decoding = 'async';
+  img.onload = function () { ph.img = img; };
+  img.onerror = function () { console.warn('图片读取失败:', ph.name); };
+  img.src = ph.src;
+  ph.img = img;
+}
+
+/* ---------- 选择目录 ---------- */
+async function pickDirectory() {
+  if (!window.showDirectoryPicker) {
+    alert('当前浏览器不支持「文件系统访问 API」。请使用 Chrome 或 Edge 打开本页面；此时页面会以内置演示照片运行。');
+    return;
+  }
+  try {
+    var handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'photowall' });
+    await useDirectory(handle);
+  } catch (err) {
+    if (err && err.name !== 'AbortError') console.error('选择目录失败:', err);
+  }
+}
+
+pickBtn.addEventListener('click', pickDirectory);
+emptyPick.addEventListener('click', pickDirectory);
+
+/* ---------- 恢复上次目录 ---------- */
+async function tryRestore() {
+  var handle = await idbGet(DB_KEY);
+  if (!handle) return false;
+  try {
+    var perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      await useDirectory(handle);
+      return true;
     }
+    pendingHandle = handle;
+    restoreName.textContent = '「' + handle.name + '」';
+    restoreBar.classList.add('show');
+    return false;
+  } catch (e) {
+    return false;
   }
-  // Arrow keys for manual panning
-  if (!modalOverlay.classList.contains('active')) {
-    const speed = 20;
-    if (e.key === 'ArrowLeft') targetVelX -= speed;
-    if (e.key === 'ArrowRight') targetVelX += speed;
-    if (e.key === 'ArrowUp') targetVelY -= speed;
-    if (e.key === 'ArrowDown') targetVelY += speed;
-  }
+}
+
+restoreBtn.addEventListener('click', async function () {
+  if (!pendingHandle) return;
+  try {
+    var perm = await pendingHandle.requestPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      await useDirectory(pendingHandle);
+    } else {
+      restoreBar.classList.remove('show');
+    }
+  } catch (e) { console.error(e); }
 });
 
-// ---- Initialization ----
-async function init() {
-  // Try to load likes from localStorage
+restoreNo.addEventListener('click', function () {
+  restoreBar.classList.remove('show');
+  pendingHandle = null;
+});
+
+/* ---------- 全屏 / UI 自动隐藏 ---------- */
+function toggleFull() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(function () {});
+  } else {
+    document.exitFullscreen();
+  }
+}
+fullBtn.addEventListener('click', toggleFull);
+
+function noteActivity() {
+  if (uiHidden) {
+    uiHidden = false;
+    topbar.classList.remove('hidden');
+    hint.classList.remove('fade');
+  }
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(function () {
+    if (openIdx >= 0) return;
+    uiHidden = true;
+    topbar.classList.add('hidden');
+    hint.classList.add('fade');
+  }, 9000);
+}
+
+window.addEventListener('mousemove', noteActivity, { passive: true });
+
+/* ---------- 键盘 ---------- */
+window.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && openIdx >= 0) { closeViewer(); return; }
+  if (e.key === 'f' || e.key === 'F') { toggleFull(); return; }
+  if (openIdx >= 0) return;
+  var step = 14;
+  if (e.key === 'ArrowLeft') { goalX -= step; noteActivity(); }
+  if (e.key === 'ArrowRight') { goalX += step; noteActivity(); }
+  if (e.key === 'ArrowUp') { goalY -= step; noteActivity(); }
+  if (e.key === 'ArrowDown') { goalY += step; noteActivity(); }
+});
+
+/* ---------- 演示照片 ---------- */
+var DEMO_NAMES = [
+  '张可爱', '李晓明', '王小花', '赵阳光', '陈星星', '刘月亮',
+  '周彩虹', '吴糖果', '郑温暖', '钱多多', '孙甜甜', '杨乐乐',
+  '黄美美', '许欢欢', '林佳佳', '何宝宝', '吕萌萌', '施俏俏',
+  '张晨曦', '孔小鹿', '曹云朵', '严晴天', '华美琳', '金闪闪',
+  '魏星宇', '陶思思', '姜小鱼', '戚小可', '谢如意', '邹幸运'
+];
+
+var DEMO_COLORS = [
+  ['#FF9A9E', '#FAD0C4'], ['#A18CD1', '#FBC2EB'], ['#FBC2EB', '#A6C1EE'],
+  ['#84FAB0', '#8FD3F4'], ['#FFD26F', '#FF9A8B'], ['#A1C4FD', '#C2E9FB'],
+  ['#FFAFBD', '#FFC3A0'], ['#96E6A1', '#D4FC79'], ['#F6D365', '#FDA085'],
+  ['#5EE7DF', '#B490CA'], ['#C1DFC4', '#DEECDD'], ['#FF9A9E', '#FECFEF'],
+  ['#F093FB', '#F5576C'], ['#4FACFE', '#00F2FE'], ['#43E97B', '#38F9D7'],
+  ['#FA709A', '#FEE140'], ['#30CFD0', '#330867'], ['#A8EDEA', '#FED6E3'],
+  ['#FF6B9D', '#C44EFF'], ['#4ECDC4', '#44A08D']
+];
+
+var DEMO_EMOJI = ['😊', '🌟', '💖', '🎀', '🌸', '✨', '🍬', '🌈', '💫', '🦋',
+                  '🎨', '🍭', '💎', '🌺', '⭐', '🐣', '🍀', '🎈', '🧸', '🌻'];
+
+function mulberry(seed) {
+  return function () {
+    seed = (seed + 0x6D2B79F5) & 0x7fffffff;
+    var t = seed;
+    t = (t ^ (t >>> 15)) * (t | 1) & 0x7fffffff;
+    t = (t + ((t ^ (t >>> 7)) * (t | 61) & 0x7fffffff)) & 0x7fffffff;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makeDemoPhoto(name, i) {
+  var cv = document.createElement('canvas');
+  cv.width = cv.height = 360;
+  var g = cv.getContext('2d');
+  var pal = DEMO_COLORS[i % DEMO_COLORS.length];
+  var rnd = mulberry(i * 7919 + 13);
+
+  var grd = g.createLinearGradient(0, 0, 360, 360);
+  grd.addColorStop(0, pal[0]);
+  grd.addColorStop(1, pal[1]);
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 360, 360);
+
+  for (var b = 0; b < 9; b++) {
+    g.beginPath();
+    g.arc(rnd() * 360, rnd() * 360, 14 + rnd() * 62, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,' + (0.05 + rnd() * 0.13).toFixed(3) + ')';
+    g.fill();
+  }
+
+  g.beginPath();
+  g.arc(180, 172, 96, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(255,255,255,0.20)';
+  g.fill();
+
+  g.font = '128px serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(DEMO_EMOJI[i % DEMO_EMOJI.length], 180, 172);
+
+  var img = new Image();
+  img.src = cv.toDataURL('image/png');
+  return img;
+}
+
+function loadDemoPhotos() {
+  likesCache = {};
   try {
-    const stored = localStorage.getItem('photowall-likes');
-    if (stored) likesData = JSON.parse(stored);
-  } catch {}
+    var stored = localStorage.getItem('photowall-likes');
+    if (stored) likesCache = JSON.parse(stored) || {};
+  } catch (e) {}
 
-  // Start with demo photos
-  generateDemoPhotos();
-  for (const p of photos) loadImage(p.src);
-  dirLabel.textContent = '演示照片 (选择目录替换)';
+  photos = DEMO_NAMES.map(function (nm, i) {
+    var img = makeDemoPhoto(nm, i);
+    return {
+      id: 'd' + i,
+      name: nm,
+      src: img.src,
+      img: img,
+      likes: likesCache[nm] || 0,
+      isDemo: true,
+      fileHandle: null
+    };
+  });
 
-  // Start animation
-  animationId = requestAnimationFrame(animate);
+  dirName.textContent = '演示照片 · ' + photos.length + ' 张';
+  dirName.title = '点击左侧按钮选择你自己的照片目录';
+  recomputeLayout();
+}
 
-  // Hide hint after 8 seconds
-  setTimeout(() => {
-    if (hint.style.opacity !== '0') {
-      hint.style.transition = 'opacity 1.5s';
-      hint.style.opacity = '0';
-    }
-  }, 8000);
+/* ---------- 启动 ---------- */
+async function init() {
+  await new Promise(function (res) {
+    var done = false;
+    var fin = function () { if (!done) { done = true; res(); } };
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(fin).catch(fin);
+      setTimeout(fin, 2600);
+    } else { fin(); }
+  });
+
+  loadDemoPhotos();
+  resize();
+
+  ready = true;
+  requestAnimationFrame(tick);
+  noteActivity();
+
+  await tryRestore();
 }
 
 init();
