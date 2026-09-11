@@ -34,7 +34,13 @@
   }
   body.dragging { cursor: grabbing; }
 
-  #stage { position: fixed; inset: 0; z-index: 1; display: block; }
+  #stage {
+    position: fixed; inset: 0; z-index: 1; display: block;
+    /* 触屏：关掉浏览器自带手势（双指缩放、双击放大、滚动），
+       否则会和自定义的拖拽/双击打架。只加在画布上，
+       顶栏按钮与弹窗内的控件仍保持正常触摸行为。 */
+    touch-action: none;
+  }
 
   #glow {
     position: fixed; inset: 0; z-index: 0; pointer-events: none;
@@ -415,6 +421,28 @@ var cursorEnergy = 0;             /* 光标拨水强度：只在鼠标真正移�
 var prevCursorX = 0, prevCursorY = 0;
 var effectPower = 1;              /* 动效力度 0~2，由顶栏滑杆控制 */
 var LAYOUT_MIN_DIST = 130;        /* 锚点之间应保持的最小距离 */
+
+/* ---------- 触屏双击 ----------
+   触屏上浏览器不会派发 dblclick：
+   touchstart 里的 preventDefault() 会一并抑制掉浏览器合成的
+   mousedown / mouseup / click / dblclick，所以双击必须自己识别。 */
+var touchMode = false;             /* 本次交互是否来自触屏 */
+var TAP_SLOP_MOUSE = 8;            /* 鼠标：点击允许的位移 */
+var TAP_SLOP_TOUCH = 24;           /* 触屏：手指抖动大，放宽判定 */
+var DOUBLE_TAP_MS = 450;           /* 双击时间窗 */
+var DOUBLE_TAP_DIST = 80;          /* 两击之间允许的位置偏差 */
+var lastTapIdx = -1;               /* 第一击点中的照片 */
+var lastTapT = 0;
+var lastTapX = 0, lastTapY = 0;
+var tapHoldIdx = -1;               /* 双击窗口内被"按住"的照片 */
+var tapHoldUntil = 0;
+
+function resetDoubleTap() {
+  lastTapIdx = -1;
+  lastTapT = 0;
+  tapHoldIdx = -1;
+  tapHoldUntil = 0;
+}
 var mouseDown = false;
 var dragVX = 0, dragVY = 0;
 var downX = 0, downY = 0;
@@ -724,7 +752,13 @@ function physics(dt, t) {
 
   /* 每帧重新判定悬停：照片本身在被水流推着走，
      只在 mousemove 里判定会漏掉"照片自己飘到光标下"的情况 */
-  if (dragIdx < 0) setHover(hoverHitTest(cursorX, cursorY));
+  if (dragIdx < 0) {
+    var hov = hoverHitTest(cursorX, cursorY);
+    /* 触屏双击窗口内：继续保持刚点中的那张冻结。
+       手指抬起后照片本会恢复漂浮，第二次点击就容易落空。 */
+    if (hov < 0 && tapHoldIdx >= 0 && performance.now() < tapHoldUntil) hov = tapHoldIdx;
+    setHover(hov);
+  }
 
   /* 被拖动的照片：目标位置 = 光标位置 + 抓取偏移 */
   if (dragIdx >= 0 && dragIdx < n) {
@@ -1262,6 +1296,11 @@ function onDown(x, y) {
   downY = lastY = y;
   dragVX = dragVY = 0;
   lastTrailT = 0;
+  /* 触屏没有 hover 事件。按下即视为"指向这里"，
+     这样"悬停冻结"在触屏上同样生效 —— 手指按住时照片立刻定住。 */
+  cursorX = x;
+  cursorY = y;
+  cursorIn = true;
   document.body.classList.add('dragging');
 
   /* 按在照片上 -> 进入「拖动这张照片」模式 */
@@ -1342,6 +1381,33 @@ function onUp(x, y) {
   document.body.classList.remove('dragging');
 
   var moved = Math.abs(x - downX) + Math.abs(y - downY);
+  /* 触屏手指抖动比鼠标大得多，点击判定要放宽，否则轻点会被当成拖动 */
+  var tapSlop = touchMode ? TAP_SLOP_TOUCH : TAP_SLOP_MOUSE;
+  var isTap = moved < tapSlop;
+
+  /* ---- 触屏双击识别 ----
+     放在最前面：若这是紧跟同一次点击的第二击，直接打开大图。
+     判定同时看【时间】【身份】【位置】三者：
+       · 时间：两击必须在 DOUBLE_TAP_MS 内
+       · 身份：第二击仍落在同一张照片上；或
+       · 位置：第二击几乎点在原处（手指允许的抖动范围）
+     只看距离是不够的 —— 相邻两张照片本身就只有一百多像素，
+     会把"点了 A 又点 B"误判成双击。 */
+  if (touchMode && isTap && lastTapIdx >= 0 &&
+      (performance.now() - lastTapT) < DOUBLE_TAP_MS) {
+    var idxNow = hitTest(x, y, HOVER_PAD());
+    var jitter = DOUBLE_TAP_DIST * 0.55;
+    var veryClose = Math.abs(x - lastTapX) < jitter &&
+                    Math.abs(y - lastTapY) < jitter;
+    if (idxNow === lastTapIdx || veryClose) {
+      var openTarget = lastTapIdx;
+      resetDoubleTap();
+      dragIdx = -1;
+      openViewer(openTarget);
+      noteActivity();
+      return;
+    }
+  }
 
   /* ---- 松手：拖动中的照片 ---- */
   if (dragIdx >= 0) {
@@ -1353,30 +1419,47 @@ function onUp(x, y) {
     dragIdx = -1;
     dragThrowX = dragThrowY = 0;
 
-    /* ★ 关键：把锚点搬到落点。
-       锚点就是这张照片"住"的地方 —— 搬过去之后它便留在新位置，
-       不会再被牵引绳拉回原处；同时整群的重聚合能力完全不受影响。 */
-    if (moved >= 8) {
+    if (!isTap) {
+      /* ★ 真正的拖动：把锚点搬到落点。
+         锚点就是这张照片"住"的地方 —— 搬过去之后它便留在新位置，
+         不会被牵引绳拉回原处；整群的重聚合能力完全不受影响。 */
       p.hx = p.x;
       p.hy = p.y;
       /* 邻居的锚点让开位置，避免和落点顶牛互相较劲；
          落点锚点本身保持不动，所以照片会准确停在你放下的地方。 */
       yieldAnchorsAround(pi, 26);
       recomputeClusterRadius();
+      resetDoubleTap();
     } else {
-      /* 若只是轻点没拖动，给一点视觉反馈（不至于毫无响应） */
+      /* 轻点：给一点视觉反馈，并记为"第一击"待命 */
       emitRipple(x, y, 0.5);
       p.spin += 0.06;
+      lastTapIdx = pi;
+      lastTapT = performance.now();
+      lastTapX = x;
+      lastTapY = y;
+      /* 触屏：双击窗口内保持这张照片冻结，否则它会飘走导致第二击落空 */
+      if (touchMode) {
+        tapHoldIdx = pi;
+        tapHoldUntil = performance.now() + DOUBLE_TAP_MS;
+      }
     }
 
-    /* 手还在照片上就继续保持悬停冻结 */
-    setHover(hoverHitTest(x, y));
+    if (touchMode) {
+      /* 手指已离开：解除悬停；双击窗口内的冻结由 tapHold 在物理引擎里维持 */
+      cursorIn = false;
+      setHover(-1);
+    } else {
+      /* 鼠标：手还在照片上就继续保持悬停冻结 */
+      setHover(hoverHitTest(x, y));
+    }
     noteActivity();
     return;
   }
 
   /* ---- 单击水面空白：激起一组同心波纹 ---- */
-  if (moved < 8) {
+  if (isTap) {
+    lastTapIdx = -1;   /* 水面上的点击不参与双击 */
     emitRipple(x, y, 1.25);
     setTimeout(function () { if (openIdx < 0) emitRipple(x, y, 0.72); }, 130);
     setTimeout(function () { if (openIdx < 0) emitRipple(x, y, 0.42); }, 260);
@@ -1392,12 +1475,20 @@ function onUp(x, y) {
   noteActivity();
 }
 
-canvas.addEventListener('mousedown', function (e) { onDown(e.clientX, e.clientY); });
+canvas.addEventListener('mousedown', function (e) {
+  touchMode = false;
+  onDown(e.clientX, e.clientY);
+});
 window.addEventListener('mousemove', function (e) { onMove(e.clientX, e.clientY); });
 window.addEventListener('mouseup', function (e) { onUp(e.clientX, e.clientY); });
 
+/* ---------- 触屏事件 ----------
+   注意：touchstart 里的 preventDefault() 会抑制掉浏览器合成的
+   鼠标事件，所以触屏上不会再有 click / dblclick —— 双击由 onUp
+   里的自定义识别负责（见 touchMode 分支）。 */
 canvas.addEventListener('touchstart', function (e) {
   if (e.touches.length === 1) {
+    touchMode = true;
     onDown(e.touches[0].clientX, e.touches[0].clientY);
     e.preventDefault();
   }
@@ -1405,6 +1496,7 @@ canvas.addEventListener('touchstart', function (e) {
 
 canvas.addEventListener('touchmove', function (e) {
   if (mouseDown && e.touches.length === 1) {
+    touchMode = true;
     onMove(e.touches[0].clientX, e.touches[0].clientY);
     e.preventDefault();
   }
@@ -1413,7 +1505,16 @@ canvas.addEventListener('touchmove', function (e) {
 canvas.addEventListener('touchend', function (e) {
   var t0 = e.changedTouches[0];
   if (t0) onUp(t0.clientX, t0.clientY);
-});
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchcancel', function (e) {
+  if (mouseDown) {
+    var t0 = e.changedTouches[0];
+    onUp(t0 ? t0.clientX : lastX, t0 ? t0.clientY : lastY);
+  }
+  e.preventDefault();
+}, { passive: false });
 
 canvas.addEventListener('wheel', function (e) {
   e.preventDefault();
@@ -1422,13 +1523,20 @@ canvas.addEventListener('wheel', function (e) {
   noteActivity();
 }, { passive: false });
 
-/* 双击照片才打开大图（单击只做拖动/反馈，避免误触） */
-canvas.addEventListener('dblclick', function (e) {
-  var idx = hitTest(e.clientX, e.clientY, HOVER_PAD());
+/* 鼠标：双击照片才打开大图（单击只做拖动/反馈，避免误触）。
+   触屏走不到这里 —— touchstart 的 preventDefault 已抑制合成鼠标事件，
+   触屏的双击由 onUp 里的自定义识别负责。 */
+function handleDblClick(x, y) {
+  if (touchMode) return;
+  var idx = hitTest(x, y, HOVER_PAD());
   if (idx >= 0) {
     dragIdx = -1;
     openViewer(idx);
   }
+}
+
+canvas.addEventListener('dblclick', function (e) {
+  handleDblClick(e.clientX, e.clientY);
 });
 
 canvas.addEventListener('mouseleave', function () { cursorIn = false; setHover(-1); });
@@ -1448,6 +1556,7 @@ function openViewer(i) {
   cursorEnergy = 0;
   hoverIdx = -1;
   dragIdx = -1;
+  resetDoubleTap();
   noteActivity();
 }
 
