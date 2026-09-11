@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📸 照片墙 - PhotoWall</title>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a1a;
+    --cell-size: 110px;
+    --name-size: 14px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: 'Segoe UI', sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+  }
+  body:active { cursor: grabbing; }
+  body.dragging { cursor: grabbing; }
+
+  /* ---- canvas layer ---- */
+  #canvas {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+
+  /* ---- top bar ---- */
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0;
+    z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px;
+    background: linear-gradient(180deg, rgba(10,10,26,0.95) 60%, rgba(10,10,26,0) 100%);
+    pointer-events: none;
+  }
+  #topbar > * { pointer-events: auto; }
+
+  #title {
+    font-family: 'ZCOOL KuaiLe', cursive;
+    font-size: 28px;
+    color: #fff;
+    text-shadow: 0 0 20px rgba(255,140,200,0.6), 0 0 60px rgba(255,140,200,0.3);
+    letter-spacing: 2px;
+  }
+
+  #btn-dir {
+    padding: 10px 22px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-radius: 30px;
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    font-size: 15px;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #btn-dir:hover {
+    background: rgba(255,255,255,0.18);
+    border-color: rgba(255,140,200,0.6);
+    box-shadow: 0 0 30px rgba(255,140,200,0.25);
+  }
+  #dir-label {
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    opacity: 0.8;
+  }
+
+  /* ---- bottom hint ---- */
+  #hint {
+    position: fixed; bottom: 30px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    color: rgba(255,255,255,0.5);
+    font-size: 14px;
+    letter-spacing: 1px;
+    transition: opacity 1.5s;
+    pointer-events: none;
+  }
+
+  /* ---- photo detail modal ---- */
+  #modal-overlay {
+    position: fixed; inset: 0;
+    z-index: 100;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(15px);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.4s;
+  }
+  #modal-overlay.active {
+    opacity: 1; pointer-events: auto;
+  }
+
+  #modal-card {
+    position: relative;
+    max-width: 85vw; max-height: 85vh;
+    background: rgba(20,20,40,0.95);
+    border-radius: 24px;
+    border: 2px solid rgba(255,255,255,0.15);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 80px rgba(255,140,200,0.15);
+    padding: 28px;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 18px;
+    transform: scale(0.9);
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+  #modal-overlay.active #modal-card { transform: scale(1); }
+
+  #modal-close {
+    position: absolute; top: 14px; right: 18px;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    font-size: 22px;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #modal-close:hover { background: rgba(255,80,80,0.4); }
+
+  #modal-img {
+    max-width: 60vw; max-height: 50vh;
+    border-radius: 16px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+    object-fit: contain;
+  }
+
+  #modal-name {
+    font-family: 'ZCOOL KuaiLe', cursive;
+    font-size: 32px;
+    color: #fff;
+    text-shadow: 0 0 20px rgba(255,200,100,0.5);
+  }
+
+  #modal-like-row {
+    display: flex; align-items: center; gap: 14px;
+  }
+  #btn-like {
+    padding: 12px 30px;
+    border: none;
+    border-radius: 30px;
+    background: linear-gradient(135deg, #ff6b9d, #ff4081);
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: 0 4px 20px rgba(255,64,129,0.4);
+    display: flex; align-items: center; gap: 8px;
+  }
+  #btn-like:hover {
+    transform: scale(1.06);
+    box-shadow: 0 6px 30px rgba(255,64,129,0.6);
+  }
+  #btn-like:active { transform: scale(0.95); }
+  #btn-like.liked {
+    background: linear-gradient(135deg, #ff4081, #e91e63);
+  }
+  #like-count {
+    font-size: 20px;
+    color: rgba(255,255,255,0.8);
+    min-width: 50px;
+    text-align: center;
+  }
+
+  /* ---- spark particles ---- */
+  .spark {
+    position: fixed;
+    z-index: 200;
+    pointer-events: none;
+    font-size: 24px;
+    animation: sparkUp 0.8s ease-out forwards;
+  }
+  @keyframes sparkUp {
+    0% { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-120px) scale(1.5); }
+  }
+
+  /* ---- responsive ---- */
+  @media (max-width: 600px) {
+    :root { --cell-size: 80px; --name-size: 11px; }
+    #title { font-size: 20px; }
+    #btn-dir { padding: 8px 14px; font-size: 13px; }
+    #modal-img { max-width: 85vw; max-height: 40vh; }
+    #modal-name { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div id="topbar">
+  <div id="title">🌟 照片墙</div>
+  <button id="btn-dir">
+    📁 <span id="dir-label">选择照片目录</span>
+  </button>
+</div>
+
+<div id="hint">🖱️ 拖拽鼠标控制流动方向 · 单击照片查看详情</div>
+
+<!-- Photo detail modal -->
+<div id="modal-overlay">
+  <div id="modal-card">
+    <button id="modal-close">✕</button>
+    <img id="modal-img" src="" alt="">
+    <div id="modal-name"></div>
+    <div id="modal-like-row">
+      <button id="btn-like">❤️ 点赞</button>
+      <span id="like-count">0 ❤️</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==================== PhotoWall Application ====================
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const modalOverlay = document.getElementById('modal-overlay');
+const modalImg = document.getElementById('modal-img');
+const modalName = document.getElementById('modal-name');
+const btnLike = document.getElementById('btn-like');
+const likeCount = document.getElementById('like-count');
+const btnDir = document.getElementById('btn-dir');
+const dirLabel = document.getElementById('dir-label');
+const hint = document.getElementById('hint');
+
+// ---- State ----
+let photos = [];               // { name, src, likes }
+let cellSize = 110;
+let nameSize = 14;
+const gap = 18;
+let viewX = 0, viewY = 0;     // viewport offset
+let velocityX = 0, velocityY = 0;
+let targetVelX = 0, targetVelY = 0;
+let mouseDown = false;
+let lastMouseX = 0, lastMouseY = 0;
+let dragVelX = 0, dragVelY = 0;
+let lastDragTime = 0;
+let animationId;
+let currentPhotoIndex = -1;
+let likedSet = new Set();     // photos liked this session
+let directoryHandle = null;
+let likesData = {};           // filename -> likes count
+const LIKES_FILENAME = 'photowall-likes.json';
+
+// ---- Responsive sizing ----
+function updateSizes() {
+  const w = window.innerWidth;
+  if (w < 600) { cellSize = 80; nameSize = 11; }
+  else if (w < 1024) { cellSize = 100; nameSize = 13; }
+  else { cellSize = 110; nameSize = 14; }
+  document.documentElement.style.setProperty('--cell-size', cellSize + 'px');
+  document.documentElement.style.setProperty('--name-size', nameSize + 'px');
+}
+updateSizes();
+window.addEventListener('resize', () => {
+  updateSizes();
+  resizeCanvas();
+});
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// ---- Generate demo photos ----
+function generateDemoPhotos() {
+  const demoNames = [
+    '张可爱', '李晓明', '王小花', '赵阳光', '陈星星',
+    '刘月亮', '周彩虹', '吴糖果', '郑温暖', '钱多多',
+    '孙甜甜', '杨乐乐', '黄美美', '许欢欢', '林佳佳',
+    '何宝宝', '吕萌萌', '施俏俏', '张晨曦', '孔小鹿',
+    '曹云朵', '严晴天', '华美琳', '金闪闪', '魏星宇',
+    '陶思思', '姜小鱼', '戚小可', '谢如意', '邹幸运',
+  ];
+
+  const colors = [
+    '#FF6B6B','#FF8E53','#FFC048','#4ECDC4','#45B7D1',
+    '#96CEB4','#FFEAA7','#DDA0DD','#98D8C8','#F7DC6F',
+    '#BB8FCE','#85C1E9','#F8C471','#82E0AA','#F1948A',
+    '#AED6F1','#D7BDE2','#A3E4D7','#FAD7A0','#F5B7B1',
+    '#7FB3D8','#F0B27A','#73C6B6','#D2B4DE','#E59866',
+    '#5499C7','#FADBD8','#A9DFBF','#F9E79F','#D5DBDF',
+  ];
+
+  photos = demoNames.map((name, i) => ({
+    name,
+    src: generateAvatarCanvas(name, colors[i % colors.length]),
+    likes: likesData[name] || 0,
+    isDemo: true,
+  }));
+}
+
+function generateAvatarCanvas(name, bgColor) {
+  const size = 200;
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const cx = c.getContext('2d');
+
+  // Background circle
+  cx.beginPath();
+  cx.arc(size/2, size/2, size/2 - 4, 0, Math.PI * 2);
+  cx.fillStyle = bgColor;
+  cx.fill();
+
+  // Subtle gradient overlay
+  const grad = cx.createRadialGradient(size*0.35, size*0.35, 0, size/2, size/2, size/2);
+  grad.addColorStop(0, 'rgba(255,255,255,0.3)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.1)');
+  cx.fillStyle = grad;
+  cx.fill();
+
+  // Emoji based on name hash
+  const emojis = ['😊','🌟','💖','🎀','🌸','✨','🍬','🌈','💫','🦋','🎨','🍭','💎','🌺','⭐'];
+  const hash = name.split('').reduce((a,c) => a + c.charCodeAt(0), 0);
+  const emoji = emojis[hash % emojis.length];
+  cx.font = '60px serif';
+  cx.textAlign = 'center';
+  cx.textBaseline = 'middle';
+  cx.fillText(emoji, size/2, size/2 - 8);
+
+  // Initial letter at bottom
+  const firstChar = name.charAt(0);
+  cx.font = 'bold 28px "ZCOOL KuaiLe", cursive';
+  cx.fillStyle = 'rgba(255,255,255,0.9)';
+  cx.fillText(firstChar, size/2, size/2 + 52);
+
+  return c.toDataURL('image/png');
+}
+
+// ---- Hexagonal grid layout ----
+function getHexPosition(index, total) {
+  // Arrange in a roughly circular honeycomb pattern
+  // Use spiral / ring-based layout
+  if (total === 0) return { x: 0, y: 0 };
+  if (index === 0) return { x: 0, y: 0 };
+
+  let ring = 0;
+  let countInPrevRings = 1; // center
+  while (true) {
+    ring++;
+    const perRing = ring * 6;
+    if (index < countInPrevRings + perRing) break;
+    countInPrevRings += perRing;
+  }
+
+  const idxInRing = index - countInPrevRings;
+  const segment = Math.floor(idxInRing / ring); // 0-5
+  const posInSegment = idxInRing % ring;
+
+  const angle60 = Math.PI / 3;
+  const startAngle = segment * angle60 - Math.PI / 6;
+
+  // Position in fractional hex coordinates
+  const frac = posInSegment / ring;
+
+  const cosA = Math.cos(startAngle);
+  const sinA = Math.sin(startAngle);
+  const cosB = Math.cos(startAngle + angle60);
+  const sinB = Math.sin(startAngle + angle60);
+
+  const hx = ring * cosA + (ring * cosB - ring * cosA) * frac;
+  const hy = ring * sinA + (ring * sinB - ring * sinA) * frac;
+
+  const spacing = cellSize + gap;
+  const x = hx * spacing;
+  const y = hy * spacing * 0.866; // sqrt(3)/2
+
+  return { x, y };
+}
+
+// ---- Rendering ----
+function getPhotoScreenPos(photo, index) {
+  const hex = getHexPosition(index, photos.length);
+  return {
+    sx: canvas.width / 2 + hex.x + viewX,
+    sy: canvas.height / 2 + hex.y + viewY,
+  };
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw subtle background particles
+  const t = performance.now() * 0.001;
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  for (let i = 0; i < 40; i++) {
+    const px = ((i * 137.5 + t * 20) % canvas.width);
+    const py = ((i * 251.3 + t * 15) % canvas.height);
+    ctx.beginPath();
+    ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const halfSize = cellSize / 2;
+
+  for (let i = 0; i < photos.length; i++) {
+    const photo = photos[i];
+    const pos = getPhotoScreenPos(photo, i);
+    const { sx, sy } = pos;
+
+    // Skip off-screen photos (with margin)
+    if (sx < -cellSize*2 || sx > canvas.width + cellSize*2 ||
+        sy < -cellSize*2 || sy > canvas.height + cellSize*2) continue;
+
+    // Glow ring
+    const isHovered = (i === currentPhotoIndex);
+    if (isHovered) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,200,100,0.7)';
+      ctx.shadowBlur = 30;
+    }
+
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(sx, sy, halfSize + 6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    if (isHovered) ctx.restore();
+
+    // Clip circle
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(sx, sy, halfSize, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Draw photo image
+    const img = imageCache.get(photo.src);
+    if (img) {
+      const scale = Math.max((cellSize) / img.width, (cellSize) / img.height);
+      const dw = img.width * scale;
+      const dh = img.height * scale;
+      ctx.drawImage(img, sx - dw/2, sy - dh/2, dw, dh);
+    } else {
+      // Placeholder while loading
+      ctx.fillStyle = '#333';
+      ctx.fill();
+      loadImage(photo.src);
+    }
+
+    ctx.restore();
+
+    // Border circle
+    ctx.beginPath();
+    ctx.arc(sx, sy, halfSize, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Inner glow
+    ctx.beginPath();
+    ctx.arc(sx, sy, halfSize, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    // Name label
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    const nameY = sy + halfSize + 18;
+    ctx.font = `bold ${nameSize}px "ZCOOL KuaiLe", cursive`;
+    ctx.textAlign = 'center';
+    const nameWidth = ctx.measureText(photo.name).width;
+    const labelPadX = 12;
+    const labelPadY = 4;
+    const labelH = nameSize + labelPadY * 2;
+    roundRect(ctx, sx - nameWidth/2 - labelPadX, nameY - nameSize/2 - labelPadY,
+              nameWidth + labelPadX*2, labelH, labelH/2);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.fillText(photo.name, sx, nameY);
+
+    // Like count mini badge
+    if (photo.likes > 0) {
+      const badgeX = sx + halfSize - 6;
+      const badgeY = sy - halfSize + 6;
+      ctx.fillStyle = 'rgba(255,64,129,0.9)';
+      ctx.beginPath();
+      ctx.arc(badgeX, badgeY, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(photo.likes > 99 ? '99+' : photo.likes, badgeX, badgeY);
+    }
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+// ---- Image cache ----
+const imageCache = new Map();
+function loadImage(src) {
+  if (imageCache.has(src)) return;
+  const img = new Image();
+  img.onload = () => { imageCache.set(src, img); };
+  img.src = src;
+}
+
+// ---- Animation loop ----
+function animate(timestamp) {
+  // Smooth velocity toward target
+  const lerp = 0.08;
+  velocityX += (targetVelX - velocityX) * lerp;
+  velocityY += (targetVelY - velocityY) * lerp;
+
+  // Apply velocity
+  viewX += velocityX;
+  viewY += velocityY;
+
+  // Damping
+  velocityX *= 0.998;
+  velocityY *= 0.998;
+
+  // Random drift when idle
+  if (!mouseDown) {
+    const driftStrength = 0.03;
+    targetVelX += (Math.random() - 0.5) * driftStrength;
+    targetVelY += (Math.random() - 0.5) * driftStrength;
+    // Clamp random drift
+    const maxDrift = 1.5;
+    targetVelX = Math.max(-maxDrift, Math.min(maxDrift, targetVelX));
+    targetVelY = Math.max(-maxDrift, Math.min(maxDrift, targetVelY));
+  }
+
+  render();
+  animationId = requestAnimationFrame(animate);
+}
+
+// ---- Mouse / Touch interaction ----
+canvas.addEventListener('mousedown', (e) => {
+  mouseDown = true;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  lastDragTime = performance.now();
+  targetVelX = 0;
+  targetVelY = 0;
+  document.body.classList.add('dragging');
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!mouseDown) {
+    // Hover detection
+    const mx = e.clientX;
+    const my = e.clientY;
+    let found = -1;
+    for (let i = photos.length - 1; i >= 0; i--) {
+      const pos = getPhotoScreenPos(photos[i], i);
+      const dx = mx - pos.sx;
+      const dy = my - pos.sy;
+      if (dx*dx + dy*dy < (cellSize/2 + 8) * (cellSize/2 + 8)) {
+        found = i; break;
+      }
+    }
+    if (found !== currentPhotoIndex) {
+      currentPhotoIndex = found;
+      canvas.style.cursor = found >= 0 ? 'pointer' : 'grab';
+    }
+    return;
+  }
+
+  const dx = e.clientX - lastMouseX;
+  const dy = e.clientY - lastMouseY;
+  viewX += dx;
+  viewY += dy;
+
+  const now = performance.now();
+  const dt = Math.max(now - lastDragTime, 1);
+  dragVelX = dx / dt * 16; // normalize to ~60fps
+  dragVelY = dy / dt * 16;
+  lastDragTime = now;
+
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+});
+
+window.addEventListener('mouseup', (e) => {
+  if (!mouseDown) return;
+  mouseDown = false;
+  document.body.classList.remove('dragging');
+
+  // Apply inertia from drag
+  targetVelX = dragVelX * 3;
+  targetVelY = dragVelY * 3;
+  dragVelX = 0;
+  dragVelY = 0;
+
+  // If it was a click (small movement), check for photo tap
+  const clickDx = Math.abs(e.clientX - lastMouseX);
+  const clickDy = Math.abs(e.clientY - lastMouseY);
+  if (clickDx < 4 && clickDy < 4 && currentPhotoIndex >= 0) {
+    openPhotoDetail(currentPhotoIndex);
+  }
+
+  // Hide hint after first interaction
+  if (hint.style.opacity !== '0') {
+    hint.style.transition = 'opacity 1.5s';
+    hint.style.opacity = '0';
+  }
+});
+
+// Touch support
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    mouseDown = true;
+    lastMouseX = e.touches[0].clientX;
+    lastMouseY = e.touches[0].clientY;
+    lastDragTime = performance.now();
+    targetVelX = 0; targetVelY = 0;
+    document.body.classList.add('dragging');
+    e.preventDefault();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  if (!mouseDown || e.touches.length !== 1) return;
+  const dx = e.touches[0].clientX - lastMouseX;
+  const dy = e.touches[0].clientY - lastMouseY;
+  viewX += dx;
+  viewY += dy;
+  const now = performance.now();
+  const dt = Math.max(now - lastDragTime, 1);
+  dragVelX = dx / dt * 16;
+  dragVelY = dy / dt * 16;
+  lastDragTime = now;
+  lastMouseX = e.touches[0].clientX;
+  lastMouseY = e.touches[0].clientY;
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  if (!mouseDown) return;
+  mouseDown = false;
+  document.body.classList.remove('dragging');
+  targetVelX = dragVelX * 3;
+  targetVelY = dragVelY * 3;
+  dragVelX = 0; dragVelY = 0;
+
+  const clickDx = Math.abs((e.changedTouches[0]?.clientX || 0) - lastMouseX);
+  const clickDy = Math.abs((e.changedTouches[0]?.clientY || 0) - lastMouseY);
+  if (clickDx < 10 && clickDy < 10 && currentPhotoIndex >= 0) {
+    openPhotoDetail(currentPhotoIndex);
+  }
+  if (hint.style.opacity !== '0') {
+    hint.style.transition = 'opacity 1.5s';
+    hint.style.opacity = '0';
+  }
+});
+
+// ---- Wheel zoom (optional) ----
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  targetVelX -= e.deltaX * 0.3;
+  targetVelY -= e.deltaY * 0.3;
+}, { passive: false });
+
+// ---- Photo detail modal ----
+function openPhotoDetail(index) {
+  const photo = photos[index];
+  if (!photo) return;
+  currentPhotoIndex = index;
+  modalImg.src = photo.src;
+  modalName.textContent = photo.name;
+  updateLikeUI(photo);
+  modalOverlay.classList.add('active');
+
+  // Pause motion
+  targetVelX = 0;
+  targetVelY = 0;
+  velocityX = 0;
+  velocityY = 0;
+}
+
+function closeModal() {
+  modalOverlay.classList.remove('active');
+  currentPhotoIndex = -1;
+}
+
+document.getElementById('modal-close').addEventListener('click', closeModal);
+modalOverlay.addEventListener('click', (e) => {
+  if (e.target === modalOverlay) closeModal();
+});
+
+// ---- Like system ----
+function updateLikeUI(photo) {
+  const isLiked = likedSet.has(photo.name);
+  btnLike.textContent = isLiked ? '❤️ 已点赞' : '🤍 点赞';
+  btnLike.classList.toggle('liked', isLiked);
+  likeCount.textContent = `${photo.likes} ❤️`;
+}
+
+btnLike.addEventListener('click', async () => {
+  if (currentPhotoIndex < 0 || currentPhotoIndex >= photos.length) return;
+  const photo = photos[currentPhotoIndex];
+
+  if (likedSet.has(photo.name)) {
+    // Unlike
+    likedSet.delete(photo.name);
+    photo.likes = Math.max(0, photo.likes - 1);
+  } else {
+    // Like
+    likedSet.add(photo.name);
+    photo.likes++;
+    spawnSparks();
+  }
+
+  updateLikeUI(photo);
+  await saveLikes();
+});
+
+function spawnSparks() {
+  const emojis = ['❤️','💖','💕','💗','✨','🌟','💝'];
+  for (let i = 0; i < 12; i++) {
+    const spark = document.createElement('div');
+    spark.className = 'spark';
+    spark.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+    spark.style.left = (40 + Math.random() * 20) + '%';
+    spark.style.top = (40 + Math.random() * 10) + '%';
+    spark.style.animationDuration = (0.6 + Math.random() * 0.8) + 's';
+    spark.style.animationDelay = Math.random() * 0.15 + 's';
+    document.body.appendChild(spark);
+    setTimeout(() => spark.remove(), 1200);
+  }
+}
+
+// ---- Persistence ----
+async function saveLikes() {
+  const data = {};
+  for (const p of photos) {
+    if (p.likes > 0) data[p.name] = p.likes;
+  }
+  likesData = data;
+
+  if (directoryHandle && !photos[0]?.isDemo) {
+    try {
+      const fileHandle = await directoryHandle.getFileHandle(LIKES_FILENAME, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(data, null, 2));
+      await writable.close();
+    } catch (err) {
+      console.warn('Save likes to directory failed, using localStorage fallback:', err);
+      localStorage.setItem('photowall-likes', JSON.stringify(data));
+    }
+  } else {
+    localStorage.setItem('photowall-likes', JSON.stringify(data));
+  }
+}
+
+async function loadLikesFromDirectory() {
+  if (!directoryHandle) return {};
+  try {
+    const fileHandle = await directoryHandle.getFileHandle(LIKES_FILENAME);
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+// ---- Directory selection ----
+btnDir.addEventListener('click', async () => {
+  try {
+    // Check if File System Access API is available
+    if (!('showDirectoryPicker' in window)) {
+      alert('⚠️ 您的浏览器不支持文件系统访问API。请使用 Chrome 或 Edge 浏览器打开此页面。\n\n当前将使用内置演示照片。');
+      return;
+    }
+
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    directoryHandle = handle;
+    await loadPhotosFromDirectory(handle);
+    dirLabel.textContent = handle.name;
+    dirLabel.title = handle.name;
+
+    // Save handle reference for next time
+    // (IndexedDB persistence of file handles is complex; we use a simpler approach)
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.error('Directory selection failed:', err);
+    }
+  }
+});
+
+async function loadPhotosFromDirectory(handle) {
+  const imageExtensions = ['.jpg','.jpeg','.png','.gif','.webp','.bmp','.svg'];
+  const newPhotos = [];
+
+  // Load likes data
+  likesData = await loadLikesFromDirectory();
+
+  for await (const [name, fileHandle] of handle.entries()) {
+    if (fileHandle.kind !== 'file') continue;
+    const ext = '.' + name.split('.').pop().toLowerCase();
+    if (!imageExtensions.includes(ext)) continue;
+
+    const file = await fileHandle.getFile();
+    const url = URL.createObjectURL(file);
+    const baseName = name.substring(0, name.lastIndexOf('.')) || name;
+
+    newPhotos.push({
+      name: baseName,
+      src: url,
+      likes: likesData[baseName] || 0,
+      isDemo: false,
+      fileHandle,
+    });
+  }
+
+  if (newPhotos.length === 0) {
+    alert('所选目录中没有找到照片文件。请选择一个包含 .jpg/.png/.gif/.webp 等图片文件的目录。');
+    return;
+  }
+
+  photos = newPhotos;
+  likedSet.clear();
+  viewX = 0; viewY = 0;
+  velocityX = 0; velocityY = 0;
+  targetVelX = 0; targetVelY = 0;
+
+  // Preload images
+  for (const p of photos) loadImage(p.src);
+
+  dirLabel.textContent = `${handle.name} (${photos.length}张)`;
+  hint.style.opacity = '1';
+}
+
+// ---- Keyboard shortcuts ----
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (modalOverlay.classList.contains('active')) {
+      closeModal();
+    }
+  }
+  // Arrow keys for manual panning
+  if (!modalOverlay.classList.contains('active')) {
+    const speed = 20;
+    if (e.key === 'ArrowLeft') targetVelX -= speed;
+    if (e.key === 'ArrowRight') targetVelX += speed;
+    if (e.key === 'ArrowUp') targetVelY -= speed;
+    if (e.key === 'ArrowDown') targetVelY += speed;
+  }
+});
+
+// ---- Initialization ----
+async function init() {
+  // Try to load likes from localStorage
+  try {
+    const stored = localStorage.getItem('photowall-likes');
+    if (stored) likesData = JSON.parse(stored);
+  } catch {}
+
+  // Start with demo photos
+  generateDemoPhotos();
+  for (const p of photos) loadImage(p.src);
+  dirLabel.textContent = '演示照片 (选择目录替换)';
+
+  // Start animation
+  animationId = requestAnimationFrame(animate);
+
+  // Hide hint after 8 seconds
+  setTimeout(() => {
+    if (hint.style.opacity !== '0') {
+      hint.style.transition = 'opacity 1.5s';
+      hint.style.opacity = '0';
+    }
+  }, 8000);
+}
+
+init();
+</script>
+</body>
+</html>
