@@ -1,6 +1,9 @@
 # Demo photos - can be large, optionally exclude
 # demo-photos/
 
+# GitHub CLI local config (contains auth token - NEVER commit)
+.gh-config/
+
 # OS files
 .DS_Store
 Thumbs.db
