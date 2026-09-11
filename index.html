@@ -247,7 +247,8 @@
 </div>
 
 <div id="hint">
-  🖱️ 拖拽搅动水流 &nbsp;·&nbsp; 点击水面激起波纹 &nbsp;·&nbsp; 单击照片放大点赞
+  👆 悬停照片会自动定住 &nbsp;·&nbsp; 拖拽照片可移动并挤开其他照片 &nbsp;·&nbsp; 双击照片放大点赞<br>
+  <span style="opacity:.72;font-size:.92em">拖拽空白处搅动水流 &nbsp;·&nbsp; 单击水面激起波纹</span>
 </div>
 
 <div id="viewer">
@@ -327,13 +328,22 @@ var cursorX = -9999, cursorY = -9999;
 var cursorIn = false;
 var lastTrailT = 0;
 var currentX = 0, currentY = 0;   /* 拖拽激起的整体水流 */
+var cursorEnergy = 0;             /* 光标拨水强度：只在鼠标真正移动时才有，停下就衰减 */
+var prevCursorX = 0, prevCursorY = 0;
 var mouseDown = false;
 var dragVX = 0, dragVY = 0;
 var downX = 0, downY = 0;
 var lastX = 0, lastY = 0;
 var lastT = 0;
-var hoverIdx = -1;
+var hoverIdx = -1;      /* 当前悬停的照片：会被"定住" */
 var openIdx = -1;
+
+/* ---- 拖拽单张照片 ---- */
+var dragIdx = -1;       /* 正在被拖动/按住的照片 */
+var dragSX = 0, dragSY = 0;   /* 光标屏幕坐标 */
+var grabOffX = 0, grabOffY = 0; /* 抓取点相对照片圆心的世界坐标偏移 */
+var dragTX = 0, dragTY = 0;   /* 照片应跟随的目标世界坐标 */
+var dragThrowX = 0, dragThrowY = 0; /* 松手时的抛出速度 */
 var liked = {};
 var dirHandle = null;
 var pendingHandle = null;
@@ -436,6 +446,7 @@ function recomputeLayout() {
       p.rotSpd = 0.28 + Math.random() * 0.5;
       p.rotPh = Math.random() * Math.PI * 2;
       p.spin = 0;
+      p.rotV = 0;
       p.rot = p.rotBase;
       p.pulsePh = Math.random() * Math.PI * 2;
     } else {
@@ -583,11 +594,37 @@ function physics(dt, t) {
   var cwy = cursorY - H() / 2 - viewY;
   var cR2 = CURSOR_R * CURSOR_R;
 
+  /* 光标能量衰减：鼠标停下约 0.3 秒后完全不再拨水 */
+  cursorEnergy *= Math.pow(0.90, dt);
+  if (cursorEnergy < 0.01) cursorEnergy = 0;
+
+  /* 每帧重新判定悬停：照片本身在被水流推着走，
+     只在 mousemove 里判定会漏掉"照片自己飘到光标下"的情况 */
+  if (dragIdx < 0) setHover(hoverHitTest(cursorX, cursorY));
+
+  /* 被拖动的照片：目标位置 = 光标位置 + 抓取偏移 */
+  if (dragIdx >= 0 && dragIdx < n) {
+    dragTX = dragSX - W() / 2 - viewX + grabOffX;
+    dragTY = dragSY - H() / 2 - viewY + grabOffY;
+  }
+
   var i, j, p, q, dx, dy, d2, d;
 
   /* ---- 第一遍：水流 + 牵引绳 + 光标拨水 ---- */
   for (i = 0; i < n; i++) {
     p = photos[i];
+
+    /* 被拖动的照片由拖动逻辑接管 */
+    if (i === dragIdx) { p.pinned = true; continue; }
+
+    /* 被悬停的照片定住：水流、波纹、光标都推不动它，方便点选 */
+    if (i === hoverIdx) {
+      p.pinned = true;
+      p.vx = 0;
+      p.vy = 0;
+      continue;
+    }
+    p.pinned = false;
 
     var f = flowAt(p.x, p.y, t, p.ph);
     p.vx += f.x * FLOW_STRENGTH * dt;
@@ -607,14 +644,16 @@ function physics(dt, t) {
       p.vy += (dy / d) * pull * dt;
     }
 
-    /* 光标像手指拨水，把照片轻轻推开 */
-    if (cursorIn) {
+    /* 光标像手指拨水 —— 但只在鼠标真正移动时才有推力。
+       鼠标一停下，推力衰减为 0，照片就会顺着水流飘回来，
+       这样才"抓得住"，不会像躲人一样一直逃。 */
+    if (cursorIn && cursorEnergy > 0.02) {
       dx = p.x - cwx;
       dy = p.y - cwy;
       d2 = dx * dx + dy * dy;
       if (d2 < cR2 && d2 > 1) {
         d = Math.sqrt(d2);
-        var cf = (1 - d / CURSOR_R) * CURSOR_K;
+        var cf = (1 - d / CURSOR_R) * CURSOR_K * cursorEnergy;
         p.vx += (dx / d) * cf * dt;
         p.vy += (dy / d) * cf * dt;
         p.spin += (dx / d) * cf * 0.0016 * dt;
@@ -658,10 +697,22 @@ function physics(dt, t) {
           /* 越贴近推得越狠：轻微错开时柔和，真正压到一起时迅速弹开 */
           if (ratio < 0.88) push *= 1 + (0.88 - ratio) * 5.5;
           var nx = dx / d, ny = dy / d;
-          p.vx += nx * push * dt;
-          p.vy += ny * push * dt;
-          q.vx -= nx * push * dt;
-          q.vy -= ny * push * dt;
+
+          /* 被定住的照片相当于无限重：推力全部由另一张承担 */
+          var wA = p.pinned ? 0 : 1;
+          var wB = q.pinned ? 0 : 1;
+          if (wA && wB) {
+            p.vx += nx * push * dt;
+            p.vy += ny * push * dt;
+            q.vx -= nx * push * dt;
+            q.vy -= ny * push * dt;
+          } else if (wA) {
+            p.vx += nx * push * dt * 2;
+            p.vy += ny * push * dt * 2;
+          } else if (wB) {
+            q.vx -= nx * push * dt * 2;
+            q.vy -= ny * push * dt * 2;
+          }
         }
       }
     }
@@ -680,6 +731,32 @@ function physics(dt, t) {
 
   for (i = 0; i < n; i++) {
     p = photos[i];
+
+    /* ---- 被拖动的照片：跟随光标，姿态也跟着甩动 ---- */
+    if (i === dragIdx) {
+      var nvx = (dragTX - p.x) * 0.42;
+      var nvy = (dragTY - p.y) * 0.42;
+      dragThrowX = nvx;
+      dragThrowY = nvy;
+      p.vx = nvx;
+      p.vy = nvy;
+      p.x += nvx * dt;
+      p.y += nvy * dt;
+      p.spin += (nvx - p.vy) * 0.0009 * dt;
+      p.spin *= Math.pow(0.90, dt);
+      p.rotV += p.spin;
+      p.rotV += (Math.sin(t * p.rotSpd + p.rotPh) * p.rotAmp * 2.2 - p.rot) * 0.05 * dt;
+      p.rotV *= Math.pow(0.90, dt);
+      p.rot += p.rotV * dt;
+      continue;
+    }
+
+    /* ---- 被悬停定住的照片：完全静止，连旋转都冻住 ---- */
+    if (p.pinned) {
+      p.vx = 0;
+      p.vy = 0;
+      continue;
+    }
 
     for (var r2 = 0; r2 < ripples.length; r2++) {
       var rp2 = ripples[r2];
@@ -707,11 +784,12 @@ function physics(dt, t) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
 
-    /* 姿态：缓慢摇摆 + 受扰自旋衰减 */
+    /* 姿态：以角速度积分，可随时冻结/解冻而不会跳变 */
     p.spin *= Math.pow(0.955, dt);
-    p.rot = p.rotBase +
-            Math.sin(t * p.rotSpd + p.rotPh) * p.rotAmp +
-            p.spin;
+    p.rotV += p.spin;
+    p.rotV += (Math.sin(t * p.rotSpd + p.rotPh) * p.rotAmp - p.rot) * 0.022 * dt;
+    p.rotV *= Math.pow(0.962, dt);
+    p.rot += p.rotV * dt;
   }
 
   /* ---- 第四遍：位置约束求解（PBD）
@@ -755,24 +833,30 @@ function physics(dt, t) {
             var nx2 = dx / d;
             var ny2 = dy / d;
 
-            /* 位置修正：各退一半 */
-            var corr = (MIND - d) * 0.5;
-            p.x += nx2 * corr;
-            p.y += ny2 * corr;
-            q.x -= nx2 * corr;
-            q.y -= ny2 * corr;
+            /* 被定住的照片不可推移，修正量全部转移给另一张。
+               这正是"拖动一张照片挤开沿途其他照片"的机制。 */
+            var pw = p.pinned ? 0 : 1;
+            var qw = q.pinned ? 0 : 1;
+            var ws = pw + qw;
+            if (ws === 0) continue;
+
+            var corr = (MIND - d);
+            p.x += nx2 * corr * (pw / ws);
+            p.y += ny2 * corr * (pw / ws);
+            q.x -= nx2 * corr * (qw / ws);
+            q.y -= ny2 * corr * (qw / ws);
 
             /* 速度修正：抹掉沿法线相互靠近的分量，避免抖动 */
             var rel = (p.vx - q.vx) * nx2 + (p.vy - q.vy) * ny2;
             if (rel < 0) {
-              var imp = rel * 0.5;
-              p.vx -= nx2 * imp; p.vy -= ny2 * imp;
-              q.vx += nx2 * imp; q.vy += ny2 * imp;
+              var imp = rel / ws;
+              if (pw) { p.vx -= nx2 * imp; p.vy -= ny2 * imp; }
+              if (qw) { q.vx += nx2 * imp; q.vy += ny2 * imp; }
             }
 
             /* 轻微碰撞自旋，看起来像真的撞到 */
-            p.spin += (dx / d) * 0.0016;
-            q.spin -= (dx / d) * 0.0016;
+            if (pw) p.spin += (dx / d) * 0.0016;
+            if (qw) q.spin -= (dx / d) * 0.0016;
           }
         }
       }
@@ -982,18 +1066,51 @@ function render(t) {
 }
 
 /* ---------- 交互 ---------- */
-function hitTest(mx, my, t) {
+/* 命中判定。pad 可放大判定半径，让"抓住"照片更容易 */
+function hitTest(mx, my, pad) {
   var best = -1;
   var bestD = Infinity;
-  var rad = cellSize / 2 + 6;
+  var rad = cellSize / 2 + (pad === undefined ? 8 : pad);
+  var rad2 = rad * rad;
+  var cx = W() / 2 + viewX;
+  var cy = H() / 2 + viewY;
   for (var i = photos.length - 1; i >= 0; i--) {
-    var p = worldToScreen(i, t);
-    var dx = mx - p.x;
-    var dy = my - p.y;
+    var p = photos[i];
+    var dx = mx - (p.x + cx);
+    var dy = my - (p.y + cy);
     var d2 = dx * dx + dy * dy;
-    if (d2 < rad * rad && d2 < bestD) { bestD = d2; best = i; }
+    if (d2 < rad2 && d2 < bestD) { bestD = d2; best = i; }
   }
   return best;
+}
+
+/* 判定半径的额外余量。
+   太小则难以瞄准，太大则"看着在空白水面"也会误锁。
+   取视觉半径的 40%，且明显小于半间距，避免相邻照片判定区重叠过多。 */
+function HOVER_PAD() { return Math.min(cellSize * 0.40, spacing * 0.34); }
+
+/* 悬停判定用更宽松的半径：光标一靠近就先"抓住"，照片就不跑了 */
+function hoverHitTest(mx, my) {
+  if (!cursorIn || openIdx >= 0 || dragIdx >= 0) return -1;
+  return hitTest(mx, my, HOVER_PAD());
+}
+
+function setHover(idx) {
+  if (idx === hoverIdx) return;
+  hoverIdx = idx;
+  if (!mouseDown && dragIdx < 0) {
+    canvas.style.cursor = idx >= 0 ? 'pointer' : 'grab';
+  }
+}
+
+/* 光标能量：鼠标真正在移动时才拨水，停下就迅速衰减 */
+function feedCursorEnergy(x, y) {
+  var mvx = x - prevCursorX;
+  var mvy = y - prevCursorY;
+  var mvl = Math.sqrt(mvx * mvx + mvy * mvy);
+  prevCursorX = x;
+  prevCursorY = y;
+  cursorEnergy = Math.min(1, cursorEnergy + mvl * 0.028);
 }
 
 function onDown(x, y) {
@@ -1003,26 +1120,60 @@ function onDown(x, y) {
   dragVX = dragVY = 0;
   lastTrailT = 0;
   document.body.classList.add('dragging');
+
+  /* 按在照片上 -> 进入「拖动这张照片」模式 */
+  var idx = hitTest(x, y, HOVER_PAD());
+  if (idx >= 0) {
+    var p = photos[idx];
+    dragIdx = idx;
+    dragSX = x;
+    dragSY = y;
+    dragTX = p.x;
+    dragTY = p.y;
+    dragThrowX = dragThrowY = 0;
+    /* 记录抓取点相对照片圆心的偏移，拖动时手感更自然 */
+    grabOffX = p.x - (x - W() / 2 - viewX);
+    grabOffY = p.y - (y - H() / 2 - viewY);
+    p.pinned = true;
+    hoverIdx = -1;
+    canvas.style.cursor = 'grabbing';
+    noteActivity();
+    return;
+  }
+
   noteActivity();
 }
 
 function onMove(x, y) {
+  feedCursorEnergy(x, y);
   cursorX = x;
   cursorY = y;
   cursorIn = true;
 
-  if (!mouseDown) {
-    if (openIdx < 0) {
-      var idx = hitTest(x, y, performance.now() / 1000);
-      if (idx !== hoverIdx) {
-        hoverIdx = idx;
-        canvas.style.cursor = idx >= 0 ? 'pointer' : 'grab';
-      }
+  /* ---- 模式 A：拖动单张照片 ---- */
+  if (dragIdx >= 0) {
+    dragSX = x;
+    dragSY = y;
+    /* 拖动沿途荡起小涟漪，顺势把路径上的其他照片挤开 */
+    var nowA = performance.now();
+    if (nowA - lastTrailT > 65) {
+      lastTrailT = nowA;
+      emitRipple(x, y, 0.26);
     }
+    lastX = x;
+    lastY = y;
+    noteActivity();
     return;
   }
 
-  /* 拖拽 = 用手推一整片水 */
+  /* ---- 模式 B：未按下，只更新悬停 ----
+     悬停由物理引擎每帧重算，这里只在鼠标移动时抢先更新一次，响应更快 */
+  if (!mouseDown) {
+    setHover(hoverHitTest(x, y));
+    return;
+  }
+
+  /* ---- 模式 C：拖拽水面 = 推一整片水 ---- */
   var dx = x - lastX;
   var dy = y - lastY;
   dragVX = dx;
@@ -1031,7 +1182,6 @@ function onMove(x, y) {
   currentX = clamp(currentX + dx * 0.34, -10, 10);
   currentY = clamp(currentY + dy * 0.34, -10, 10);
 
-  /* 拖拽尾迹荡起小涟漪 */
   var now = performance.now();
   var spd = Math.abs(dx) + Math.abs(dy);
   if (spd > 4 && now - lastTrailT > 85) {
@@ -1050,23 +1200,34 @@ function onUp(x, y) {
 
   var moved = Math.abs(x - downX) + Math.abs(y - downY);
 
-  if (moved < 8) {
-    var t = performance.now() / 1000;
-    var idx = hitTest(x, y, t);
+  /* ---- 松手：拖动中的照片 ---- */
+  if (dragIdx >= 0) {
+    var pi = dragIdx;
+    var p = photos[pi];
+    p.vx = clamp(dragThrowX * 1.5, -13, 13);
+    p.vy = clamp(dragThrowY * 1.5, -13, 13);
+    p.spin += (dragThrowX - dragThrowY) * 0.0012;
+    dragIdx = -1;
+    dragThrowX = dragThrowY = 0;
 
-    if (idx >= 0) {
-      openViewer(idx);
-      currentX = currentY = 0;
-      noteActivity();
-      return;
+    /* 若只是轻点没拖动，给一点视觉反馈（不至于毫无响应） */
+    if (moved < 8) {
+      emitRipple(x, y, 0.5);
+      p.spin += 0.06;
     }
 
-    /* 点在"水面"上：激起一组同心波纹 */
+    /* 手还在照片上就继续保持悬停冻结 */
+    setHover(hoverHitTest(x, y));
+    noteActivity();
+    return;
+  }
+
+  /* ---- 单击水面空白：激起一组同心波纹 ---- */
+  if (moved < 8) {
     emitRipple(x, y, 1.25);
     setTimeout(function () { if (openIdx < 0) emitRipple(x, y, 0.72); }, 130);
     setTimeout(function () { if (openIdx < 0) emitRipple(x, y, 0.42); }, 260);
 
-    /* 同时给一个向外的整体推力 */
     var ddx = x - W() / 2;
     var ddy = y - H() / 2;
     var dl = Math.sqrt(ddx * ddx + ddy * ddy) || 1;
@@ -1108,8 +1269,17 @@ canvas.addEventListener('wheel', function (e) {
   noteActivity();
 }, { passive: false });
 
-canvas.addEventListener('mouseleave', function () { cursorIn = false; });
-window.addEventListener('blur', function () { cursorIn = false; });
+/* 双击照片才打开大图（单击只做拖动/反馈，避免误触） */
+canvas.addEventListener('dblclick', function (e) {
+  var idx = hitTest(e.clientX, e.clientY, HOVER_PAD());
+  if (idx >= 0) {
+    dragIdx = -1;
+    openViewer(idx);
+  }
+});
+
+canvas.addEventListener('mouseleave', function () { cursorIn = false; setHover(-1); });
+window.addEventListener('blur', function () { cursorIn = false; setHover(-1); });
 
 /* ---------- 放大查看 + 点赞 ---------- */
 function openViewer(i) {
@@ -1122,6 +1292,9 @@ function openViewer(i) {
   goalX = goalY = velX = velY = 0;
   currentX = currentY = 0;
   cursorIn = false;
+  cursorEnergy = 0;
+  hoverIdx = -1;
+  dragIdx = -1;
   noteActivity();
 }
 
