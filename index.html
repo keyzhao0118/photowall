@@ -81,8 +81,52 @@
   .btn.icon { padding: 10px 13px; font-size: 17px; }
 
   #dirName {
-    max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 30vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     opacity: .85; font-size: 13.5px;
+  }
+
+  /* ---------- 动效力度滑杆 ---------- */
+  #powerWrap {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 15px 7px 14px;
+    border: 1.5px solid rgba(255,255,255,.24);
+    border-radius: 999px;
+    background: rgba(255,255,255,.07);
+    backdrop-filter: blur(12px);
+    transition: border-color .25s, box-shadow .25s;
+  }
+  #powerWrap:hover {
+    border-color: rgba(255,107,157,.6);
+    box-shadow: 0 0 24px rgba(255,107,157,.28);
+  }
+  #powerWrap .pw-ico { font-size: 14px; line-height: 1; opacity: .9; }
+  #powerVal {
+    font-size: 12.5px; min-width: 40px; text-align: right;
+    opacity: .85; font-variant-numeric: tabular-nums;
+  }
+
+  #power {
+    -webkit-appearance: none; appearance: none;
+    width: 112px; height: 5px; border-radius: 999px;
+    background: linear-gradient(90deg, #7b5cff, #ff6b9d);
+    outline: none; cursor: pointer; margin: 0;
+  }
+  #power::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #fff; cursor: pointer;
+    box-shadow: 0 0 10px rgba(255,107,157,.95), 0 1px 4px rgba(0,0,0,.5);
+    transition: transform .15s;
+  }
+  #power::-webkit-slider-thumb:hover { transform: scale(1.25); }
+  #power::-moz-range-thumb {
+    width: 15px; height: 15px; border: none; border-radius: 50%;
+    background: #fff; cursor: pointer;
+    box-shadow: 0 0 10px rgba(255,107,157,.95), 0 1px 4px rgba(0,0,0,.5);
+  }
+  #power::-moz-range-track {
+    height: 5px; border-radius: 999px;
+    background: linear-gradient(90deg, #7b5cff, #ff6b9d);
   }
 
   #restore {
@@ -120,7 +164,7 @@
   #card {
     position: relative;
     display: flex; flex-direction: column; align-items: center; gap: 20px;
-    padding: 26px 30px 30px; border-radius: 30px;
+    padding: 54px 30px 30px; border-radius: 30px;
     background: linear-gradient(160deg, rgba(38,38,66,.96), rgba(18,18,36,.97));
     border: 1.5px solid rgba(255,255,255,.14);
     box-shadow: 0 30px 90px rgba(0,0,0,.7), 0 0 100px rgba(255,107,157,.14);
@@ -130,16 +174,26 @@
   }
   #viewer.open #card { transform: scale(1) translateY(0); }
 
+  /* 关闭按钮：必须压住图片层。
+     #bigWrap 在 DOM 中位于其后且同为定位元素，不显式提层就会被图片盖住。 */
   #closeBtn {
-    position: absolute; top: 14px; right: 16px;
-    width: 40px; height: 40px; border-radius: 50%;
-    border: none; cursor: pointer;
-    background: rgba(255,255,255,.1); color: #fff;
-    font-size: 21px; line-height: 1;
+    position: absolute; top: 12px; right: 14px;
+    z-index: 5;
+    width: 38px; height: 38px; border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,.22);
+    cursor: pointer;
+    background: rgba(28,28,52,.92); color: #fff;
+    font-size: 20px; line-height: 1;
     display: flex; align-items: center; justify-content: center;
-    transition: background .25s, transform .2s;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 18px rgba(0,0,0,.5);
+    transition: background .25s, transform .2s, border-color .25s;
   }
-  #closeBtn:hover { background: rgba(255,70,90,.55); transform: rotate(90deg); }
+  #closeBtn:hover {
+    background: rgba(255,70,90,.85);
+    border-color: rgba(255,120,140,.7);
+    transform: rotate(90deg);
+  }
 
   #bigWrap {
     position: relative; border-radius: 22px; overflow: hidden;
@@ -209,6 +263,10 @@
     #brand { font-size: 19px; letter-spacing: 1px; }
     .btn { padding: 8px 14px; font-size: 13px; }
     #dirName { display: none; }
+    #power { width: 66px; }
+    #powerWrap { padding: 6px 10px; gap: 7px; }
+    #powerVal { min-width: 34px; font-size: 11px; }
+    #card { padding: 48px 18px 22px; }
     #bigName { font-size: 26px; }
     #bigImg { max-width: 84vw; max-height: 44vh; }
     #likeBtn { padding: 11px 22px; font-size: 16px; }
@@ -225,6 +283,11 @@
 <div id="topbar">
   <div id="brand"><span class="dot"></span>照片墙</div>
   <div id="actions">
+    <div id="powerWrap" title="动效力度：控制波纹冲击、光标拨水和拖拽搅水的强度">
+      <span class="pw-ico">🎚️</span>
+      <input type="range" id="power" min="0" max="200" step="5" value="100" aria-label="动效力度">
+      <span id="powerVal">100%</span>
+    </div>
     <button class="btn" id="pickBtn">📁 <span>选择照片目录</span></button>
     <span id="dirName"></span>
     <button class="btn icon" id="fullBtn" title="全屏 (F)">⛶</button>
@@ -299,6 +362,8 @@ var bigName = document.getElementById('bigName');
 var likeBtn = document.getElementById('likeBtn');
 var likeLabel = document.getElementById('likeLabel');
 var likeNum = document.getElementById('likeNum');
+var powerSlider = document.getElementById('power');
+var powerVal = document.getElementById('powerVal');
 
 /* ---------- 水流物理参数 ---------- */
 var FLOW_STRENGTH = 0.062;   /* 水流推力 */
@@ -312,7 +377,7 @@ var CURSOR_R      = 175;     /* 光标拨水半径 */
 var CURSOR_K      = 1.9;     /* 光标拨水力度 */
 var RIPPLE_SPEED  = 11;      /* 波纹扩散速度 */
 var RIPPLE_BAND   = 48;      /* 波纹作用带宽 */
-var RIPPLE_POWER  = 5.6;     /* 波纹冲力 */
+var RIPPLE_POWER  = 2.6;     /* 波纹冲力（基准值，实际乘以动效力度） */
 
 var photos = [];
 var clusterR = 0;
@@ -330,6 +395,7 @@ var lastTrailT = 0;
 var currentX = 0, currentY = 0;   /* 拖拽激起的整体水流 */
 var cursorEnergy = 0;             /* 光标拨水强度：只在鼠标真正移动时才有，停下就衰减 */
 var prevCursorX = 0, prevCursorY = 0;
+var effectPower = 1;              /* 动效力度 0~2，由顶栏滑杆控制 */
 var mouseDown = false;
 var dragVX = 0, dragVY = 0;
 var downX = 0, downY = 0;
@@ -594,6 +660,11 @@ function physics(dt, t) {
   var cwy = cursorY - H() / 2 - viewY;
   var cR2 = CURSOR_R * CURSOR_R;
 
+  /* 动效力度：冲击类效果全额缩放；
+     环境水流保留 35% 底噪，即使力度调到 0 画面也不会死掉 */
+  var P = effectPower;
+  var flowK = FLOW_STRENGTH * (0.35 + 0.65 * P);
+
   /* 光标能量衰减：鼠标停下约 0.3 秒后完全不再拨水 */
   cursorEnergy *= Math.pow(0.90, dt);
   if (cursorEnergy < 0.01) cursorEnergy = 0;
@@ -627,12 +698,12 @@ function physics(dt, t) {
     p.pinned = false;
 
     var f = flowAt(p.x, p.y, t, p.ph);
-    p.vx += f.x * FLOW_STRENGTH * dt;
-    p.vy += f.y * FLOW_STRENGTH * dt;
+    p.vx += f.x * flowK * dt;
+    p.vy += f.y * flowK * dt;
 
     /* 拖拽激起的整体水流，像用手推一整片水 */
-    p.vx += currentX * dt;
-    p.vy += currentY * dt;
+    p.vx += currentX * P * dt;
+    p.vy += currentY * P * dt;
 
     /* 牵引绳：超出松弛半径才回拉，半径内完全自由 */
     dx = p.hx - p.x;
@@ -653,7 +724,7 @@ function physics(dt, t) {
       d2 = dx * dx + dy * dy;
       if (d2 < cR2 && d2 > 1) {
         d = Math.sqrt(d2);
-        var cf = (1 - d / CURSOR_R) * CURSOR_K * cursorEnergy;
+        var cf = (1 - d / CURSOR_R) * CURSOR_K * cursorEnergy * P;
         p.vx += (dx / d) * cf * dt;
         p.vy += (dy / d) * cf * dt;
         p.spin += (dx / d) * cf * 0.0016 * dt;
@@ -766,7 +837,7 @@ function physics(dt, t) {
       if (d < 1) { dx = 0.7; dy = 0.7; d = 1; }
       var off = Math.abs(d - rp2.r);
       if (off < RIPPLE_BAND) {
-        var w = (1 - off / RIPPLE_BAND) * rp2.life * rp2.power * RIPPLE_POWER;
+        var w = (1 - off / RIPPLE_BAND) * rp2.life * rp2.power * RIPPLE_POWER * P;
         p.vx += (dx / d) * w * dt;
         p.vy += (dy / d) * w * dt;
         p.spin += (dx / d) * w * 0.011 * dt;
@@ -1102,6 +1173,24 @@ function setHover(idx) {
     canvas.style.cursor = idx >= 0 ? 'pointer' : 'grab';
   }
 }
+
+/* ---------- 动效力度 ---------- */
+function setPower(v) {
+  effectPower = clamp(v, 0, 2);
+  powerVal.textContent = Math.round(effectPower * 100) + '%';
+  try { localStorage.setItem('photowall-power', String(effectPower)); } catch (e) {}
+}
+
+powerSlider.addEventListener('input', function () {
+  setPower(parseFloat(this.value) / 100);
+  noteActivity();
+});
+/* 双击滑杆复位到 100% */
+powerSlider.addEventListener('dblclick', function () {
+  powerSlider.value = '100';
+  setPower(1);
+  noteActivity();
+});
 
 /* 光标能量：鼠标真正在移动时才拨水，停下就迅速衰减 */
 function feedCursorEnergy(x, y) {
@@ -1696,6 +1785,18 @@ async function init() {
       setTimeout(fin, 2600);
     } else { fin(); }
   });
+
+  /* 恢复上次的动效力度 */
+  try {
+    var savedPower = localStorage.getItem('photowall-power');
+    if (savedPower !== null) {
+      var pv = parseFloat(savedPower);
+      if (isFinite(pv)) {
+        setPower(pv);
+        powerSlider.value = String(Math.round(effectPower * 100));
+      }
+    }
+  } catch (e) {}
 
   loadDemoPhotos();
   resize();
