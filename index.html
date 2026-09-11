@@ -247,7 +247,7 @@
 </div>
 
 <div id="hint">
-  🖱️ 拖拽鼠标控制流动方向 &nbsp;·&nbsp; 单击照片放大查看 &nbsp;·&nbsp; 双击空白处全屏
+  🖱️ 拖拽搅动水流 &nbsp;·&nbsp; 点击水面激起波纹 &nbsp;·&nbsp; 单击照片放大点赞
 </div>
 
 <div id="viewer">
@@ -299,18 +299,34 @@ var likeBtn = document.getElementById('likeBtn');
 var likeLabel = document.getElementById('likeLabel');
 var likeNum = document.getElementById('likeNum');
 
+/* ---------- 水流物理参数 ---------- */
+var FLOW_STRENGTH = 0.062;   /* 水流推力 */
+var FLOW_SCALE    = 0.0021;  /* 流场空间频率 */
+var FREE_RADIUS   = 24;      /* 牵引绳松弛半径：此范围内完全自由 */
+var SPRING_K      = 0.0022;  /* 牵引绳刚度（越小越散） */
+var SEP_K         = 0.62;    /* 照片互斥强度 */
+var DRAG          = 0.957;   /* 水的阻尼 */
+var MAXV          = 7.5;     /* 单帧速度上限，防爆 */
+var CURSOR_R      = 175;     /* 光标拨水半径 */
+var CURSOR_K      = 1.9;     /* 光标拨水力度 */
+var RIPPLE_SPEED  = 11;      /* 波纹扩散速度 */
+var RIPPLE_BAND   = 48;      /* 波纹作用带宽 */
+var RIPPLE_POWER  = 5.6;     /* 波纹冲力 */
+
 var photos = [];
-var layout = [];
 var clusterR = 0;
+/* 已废弃：照片不再锁定在格点上，改为独立物理个体 */
 var cellSize = 110;
 var spacing = 132;
 var viewX = 0, viewY = 0;
 var velX = 0, velY = 0;
 var goalX = 0, goalY = 0;
-var rot = 0;
-var rotVel = 0.00022;
-var cosR = 1, sinR = 0;
 var wanderA = Math.random() * Math.PI * 2;
+var ripples = [];
+var cursorX = -9999, cursorY = -9999;
+var cursorIn = false;
+var lastTrailT = 0;
+var currentX = 0, currentY = 0;   /* 拖拽激起的整体水流 */
 var mouseDown = false;
 var dragVX = 0, dragVY = 0;
 var downX = 0, downY = 0;
@@ -381,9 +397,9 @@ function hexRings(rings) {
   return cells;
 }
 
+/* 用六边形给出「锚点」，再叠加随机抖动打散格点感 */
 function recomputeLayout() {
   var n = photos.length;
-  layout = [];
   clusterR = 0;
   if (n === 0) return;
 
@@ -396,17 +412,78 @@ function recomputeLayout() {
   s = clamp(s, 104, 208);
   spacing = s;
   cellSize = Math.round(s * 0.78);
+  SEP_RADIUS = cellSize * 1.22;
 
   var cells = hexRings(rings);
   for (var k = 0; k < n; k++) {
+    var p = photos[k];
     var c = cells[k];
-    var x = spacing * (c[0] + c[1] * 0.5);
-    var y = spacing * 0.8660254 * c[1];
-    layout.push({ x: x, y: y });
-    var dist = Math.sqrt(x * x + y * y);
+    var bx = spacing * (c[0] + c[1] * 0.5);
+    var by = spacing * 0.8660254 * c[1];
+
+    /* 锚点 = 六边形位置 + 随机抖动，彻底打散网格感 */
+    if (p.hx === undefined) {
+      p.hx = bx + (Math.random() - 0.5) * spacing * 0.40;
+      p.hy = by + (Math.random() - 0.5) * spacing * 0.40;
+      p.x = p.hx;
+      p.y = p.hy;
+      p.vx = 0;
+      p.vy = 0;
+      p.ph = Math.random() * Math.PI * 2;
+      p.ph2 = Math.random() * Math.PI * 2;
+      p.rotBase = (Math.random() - 0.5) * 0.16;
+      p.rotAmp = 0.035 + Math.random() * 0.075;
+      p.rotSpd = 0.28 + Math.random() * 0.5;
+      p.rotPh = Math.random() * Math.PI * 2;
+      p.spin = 0;
+      p.rot = p.rotBase;
+      p.pulsePh = Math.random() * Math.PI * 2;
+    } else {
+      /* 尺寸变化时锚点按比例缩放，位置平滑过渡 */
+      var ratio = s / (p._lastSpacing || s);
+      p.hx *= ratio;
+      p.hy *= ratio;
+      p.x *= ratio;
+      p.y *= ratio;
+    }
+    p._lastSpacing = s;
+  }
+
+  /* 锚点松弛：抖动可能让相邻锚点挤在一起，用几轮互斥迭代推开。
+     结果既是有机的散布，又保证任意两张照片不重叠。 */
+  relaxAnchors(Math.max(cellSize * 1.16, spacing * 0.90), 64);
+
+  for (var m = 0; m < n; m++) {
+    var q = photos[m];
+    var dist = Math.sqrt(q.hx * q.hx + q.hy * q.hy);
     if (dist > clusterR) clusterR = dist;
   }
   sprites.clear();
+}
+
+/* 迭代式互斥松弛：把靠得太近的锚点推开，得到自然又不重叠的初始散布 */
+function relaxAnchors(minDist, iterations) {
+  var n = photos.length;
+  if (n < 2) return;
+  var minD2 = minDist * minDist;
+  for (var it = 0; it < iterations; it++) {
+    for (var i = 0; i < n; i++) {
+      var a = photos[i];
+      for (var j = i + 1; j < n; j++) {
+        var b = photos[j];
+        var dx = a.hx - b.hx;
+        var dy = a.hy - b.hy;
+        var d2 = dx * dx + dy * dy;
+        if (d2 >= minD2 || d2 < 0.0001) continue;
+        var d = Math.sqrt(d2);
+        var push = (minDist - d) * 0.5;
+        var nx = dx / d;
+        var ny = dy / d;
+        a.hx += nx * push; a.hy += ny * push;
+        b.hx -= nx * push; b.hy -= ny * push;
+      }
+    }
+  }
 }
 
 /* ---------- 精灵图预渲染 ---------- */
@@ -482,27 +559,260 @@ function makeSprite(photo) {
   return cv;
 }
 
-/* ---------- 动画 ---------- */
+/* ---------- 水流物理引擎 ---------- */
+var SEP_RADIUS = 130;
+
+/* 平滑时空流场：多个正弦叠加，产生类似水下暗流的连续推力 */
+function flowAt(x, y, t, ph) {
+  var k = FLOW_SCALE;
+  var fx = Math.sin(y * k + t * 0.55 + ph) +
+           0.55 * Math.sin((y + x * 0.62) * k * 1.7 - t * 0.34 + ph * 0.6) +
+           0.28 * Math.cos((x - y) * k * 0.8 + t * 0.22);
+  var fy = Math.cos(x * k + t * 0.47 + ph * 1.3) +
+           0.55 * Math.cos((x - y * 0.72) * k * 1.6 + t * 0.29 + ph * 0.9) +
+           0.28 * Math.sin((x + y) * k * 0.85 - t * 0.26);
+  return { x: fx, y: fy };
+}
+
+function physics(dt, t) {
+  var n = photos.length;
+  if (n === 0) return;
+
+  /* 光标换算到世界坐标 */
+  var cwx = cursorX - W() / 2 - viewX;
+  var cwy = cursorY - H() / 2 - viewY;
+  var cR2 = CURSOR_R * CURSOR_R;
+
+  var i, j, p, q, dx, dy, d2, d;
+
+  /* ---- 第一遍：水流 + 牵引绳 + 光标拨水 ---- */
+  for (i = 0; i < n; i++) {
+    p = photos[i];
+
+    var f = flowAt(p.x, p.y, t, p.ph);
+    p.vx += f.x * FLOW_STRENGTH * dt;
+    p.vy += f.y * FLOW_STRENGTH * dt;
+
+    /* 拖拽激起的整体水流，像用手推一整片水 */
+    p.vx += currentX * dt;
+    p.vy += currentY * dt;
+
+    /* 牵引绳：超出松弛半径才回拉，半径内完全自由 */
+    dx = p.hx - p.x;
+    dy = p.hy - p.y;
+    d = Math.sqrt(dx * dx + dy * dy);
+    if (d > FREE_RADIUS) {
+      var pull = (d - FREE_RADIUS) * SPRING_K;
+      p.vx += (dx / d) * pull * dt;
+      p.vy += (dy / d) * pull * dt;
+    }
+
+    /* 光标像手指拨水，把照片轻轻推开 */
+    if (cursorIn) {
+      dx = p.x - cwx;
+      dy = p.y - cwy;
+      d2 = dx * dx + dy * dy;
+      if (d2 < cR2 && d2 > 1) {
+        d = Math.sqrt(d2);
+        var cf = (1 - d / CURSOR_R) * CURSOR_K;
+        p.vx += (dx / d) * cf * dt;
+        p.vy += (dy / d) * cf * dt;
+        p.spin += (dx / d) * cf * 0.0016 * dt;
+      }
+    }
+  }
+
+  /* ---- 第二遍：照片互斥（空间哈希，O(n) 近似） ---- */
+  var grid = new Map();
+  var cs = SEP_RADIUS;
+  for (i = 0; i < n; i++) {
+    p = photos[i];
+    var gx = Math.floor(p.x / cs);
+    var gy = Math.floor(p.y / cs);
+    var key = gx + ',' + gy;
+    var bucket = grid.get(key);
+    if (!bucket) { bucket = []; grid.set(key, bucket); }
+    bucket.push(i);
+  }
+
+  var SEP2 = SEP_RADIUS * SEP_RADIUS;
+  for (i = 0; i < n; i++) {
+    p = photos[i];
+    var bgx = Math.floor(p.x / cs);
+    var bgy = Math.floor(p.y / cs);
+    for (var ox = -1; ox <= 1; ox++) {
+      for (var oy = -1; oy <= 1; oy++) {
+        var bk = grid.get((bgx + ox) + ',' + (bgy + oy));
+        if (!bk) continue;
+        for (var b = 0; b < bk.length; b++) {
+          j = bk[b];
+          if (j <= i) continue;
+          q = photos[j];
+          dx = p.x - q.x;
+          dy = p.y - q.y;
+          d2 = dx * dx + dy * dy;
+          if (d2 >= SEP2 || d2 < 0.0001) continue;
+          d = Math.sqrt(d2);
+          var ratio = d / SEP_RADIUS;
+          var push = (1 - ratio) * SEP_K;
+          /* 越贴近推得越狠：轻微错开时柔和，真正压到一起时迅速弹开 */
+          if (ratio < 0.88) push *= 1 + (0.88 - ratio) * 5.5;
+          var nx = dx / d, ny = dy / d;
+          p.vx += nx * push * dt;
+          p.vy += ny * push * dt;
+          q.vx -= nx * push * dt;
+          q.vy -= ny * push * dt;
+        }
+      }
+    }
+  }
+
+  /* ---- 第三遍：波纹冲力 + 积分 + 姿态 ---- */
+  var alive = [];
+  for (var r = 0; r < ripples.length; r++) {
+    var rp = ripples[r];
+    rp.r += RIPPLE_SPEED * rp.power * dt;
+    rp.life -= 0.0105 * dt;
+    rp.power = 1 - rp.r / rp.maxR;
+    if (rp.life > 0 && rp.power > 0) alive.push(rp);
+  }
+  ripples = alive;
+
+  for (i = 0; i < n; i++) {
+    p = photos[i];
+
+    for (var r2 = 0; r2 < ripples.length; r2++) {
+      var rp2 = ripples[r2];
+      dx = p.x - rp2.x;
+      dy = p.y - rp2.y;
+      d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 1) { dx = 0.7; dy = 0.7; d = 1; }
+      var off = Math.abs(d - rp2.r);
+      if (off < RIPPLE_BAND) {
+        var w = (1 - off / RIPPLE_BAND) * rp2.life * rp2.power * RIPPLE_POWER;
+        p.vx += (dx / d) * w * dt;
+        p.vy += (dy / d) * w * dt;
+        p.spin += (dx / d) * w * 0.011 * dt;
+      }
+    }
+
+    var damp = Math.pow(DRAG, dt);
+    p.vx *= damp;
+    p.vy *= damp;
+
+    var sp = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+    if (sp < 0.004) { p.vx = 0; p.vy = 0; }
+    if (sp > MAXV) { p.vx = p.vx / sp * MAXV; p.vy = p.vy / sp * MAXV; }
+
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    /* 姿态：缓慢摇摆 + 受扰自旋衰减 */
+    p.spin *= Math.pow(0.955, dt);
+    p.rot = p.rotBase +
+            Math.sin(t * p.rotSpd + p.rotPh) * p.rotAmp +
+            p.spin;
+  }
+
+  /* ---- 第四遍：位置约束求解（PBD）
+     软性斥力只能"倾向于"分开，无法硬保证不重叠。
+     这里直接修正位置 + 消除相互靠近的速度分量，
+     做到数学上不可能出现可见重叠。 ---- */
+  var MIND = cellSize * 1.06;
+  var MIND2 = MIND * MIND;
+  var cs2 = MIND;
+
+  for (var iter = 0; iter < 2; iter++) {
+    var g2 = new Map();
+    for (i = 0; i < n; i++) {
+      p = photos[i];
+      var kx = Math.floor(p.x / cs2);
+      var ky = Math.floor(p.y / cs2);
+      var kk = kx + ',' + ky;
+      var bb = g2.get(kk);
+      if (!bb) { bb = []; g2.set(kk, bb); }
+      bb.push(i);
+    }
+
+    for (i = 0; i < n; i++) {
+      p = photos[i];
+      var qx = Math.floor(p.x / cs2);
+      var qy = Math.floor(p.y / cs2);
+      for (var ax = -1; ax <= 1; ax++) {
+        for (var ay = -1; ay <= 1; ay++) {
+          var bucket2 = g2.get((qx + ax) + ',' + (qy + ay));
+          if (!bucket2) continue;
+          for (var c2 = 0; c2 < bucket2.length; c2++) {
+            j = bucket2[c2];
+            if (j <= i) continue;
+            q = photos[j];
+            dx = p.x - q.x;
+            dy = p.y - q.y;
+            d2 = dx * dx + dy * dy;
+            if (d2 >= MIND2 || d2 < 0.000001) continue;
+
+            d = Math.sqrt(d2);
+            var nx2 = dx / d;
+            var ny2 = dy / d;
+
+            /* 位置修正：各退一半 */
+            var corr = (MIND - d) * 0.5;
+            p.x += nx2 * corr;
+            p.y += ny2 * corr;
+            q.x -= nx2 * corr;
+            q.y -= ny2 * corr;
+
+            /* 速度修正：抹掉沿法线相互靠近的分量，避免抖动 */
+            var rel = (p.vx - q.vx) * nx2 + (p.vy - q.vy) * ny2;
+            if (rel < 0) {
+              var imp = rel * 0.5;
+              p.vx -= nx2 * imp; p.vy -= ny2 * imp;
+              q.vx += nx2 * imp; q.vy += ny2 * imp;
+            }
+
+            /* 轻微碰撞自旋，看起来像真的撞到 */
+            p.spin += (dx / d) * 0.0016;
+            q.spin -= (dx / d) * 0.0016;
+          }
+        }
+      }
+    }
+  }
+}
+
+function emitRipple(sx, sy, power) {
+  ripples.push({
+    x: sx - W() / 2 - viewX,
+    y: sy - H() / 2 - viewY,
+    r: 6,
+    maxR: Math.max(W(), H()) * (0.42 + Math.random() * 0.16),
+    life: 1,
+    power: power || 1
+  });
+  if (ripples.length > 26) ripples.shift();
+}
+
 function tick(now) {
   var t = now / 1000;
   var dt = lastT ? Math.min((now - lastT) / 16.667, 3) : 1;
   lastT = now;
 
   if (openIdx < 0) {
+    /* 相机极缓慢漂移，让整幅画面有"整体流动"感 */
     wanderA += (Math.random() - 0.5) * 0.20 * dt;
-    goalX += Math.cos(wanderA) * 0.030 * dt;
-    goalY += Math.sin(wanderA) * 0.030 * dt;
+    goalX += Math.cos(wanderA) * 0.022 * dt;
+    goalY += Math.sin(wanderA) * 0.022 * dt;
 
-    var maxX = Math.max(W() * 0.05, clusterR - W() * 0.20);
-    var maxY = Math.max(H() * 0.05, clusterR - H() * 0.20);
-    if (viewX > maxX) goalX -= (viewX - maxX) * 0.0028 * dt;
-    if (viewX < -maxX) goalX += (-maxX - viewX) * 0.0028 * dt;
-    if (viewY > maxY) goalY -= (viewY - maxY) * 0.0028 * dt;
-    if (viewY < -maxY) goalY += (-maxY - viewY) * 0.0028 * dt;
+    var maxX = Math.max(W() * 0.04, clusterR - W() * 0.20);
+    var maxY = Math.max(H() * 0.04, clusterR - H() * 0.20);
+    if (viewX > maxX) goalX -= (viewX - maxX) * 0.0026 * dt;
+    if (viewX < -maxX) goalX += (-maxX - viewX) * 0.0026 * dt;
+    if (viewY > maxY) goalY -= (viewY - maxY) * 0.0026 * dt;
+    if (viewY < -maxY) goalY += (-maxY - viewY) * 0.0026 * dt;
 
-    var damp = Math.pow(0.986, dt);
-    goalX = clamp(goalX * damp, -2.4, 2.4);
-    goalY = clamp(goalY * damp, -2.4, 2.4);
+    var damp = Math.pow(0.988, dt);
+    goalX = clamp(goalX * damp, -2.2, 2.2);
+    goalY = clamp(goalY * damp, -2.2, 2.2);
 
     var ease = Math.min(1, 0.05 * dt);
     velX += (goalX - velX) * ease;
@@ -511,48 +821,112 @@ function tick(now) {
     viewX += velX * dt;
     viewY += velY * dt;
 
-    rot += rotVel * dt;
-    if (rot > Math.PI * 2) rot -= Math.PI * 2;
-  }
+    var cd = Math.pow(0.930, dt);
+    currentX *= cd;
+    currentY *= cd;
+    if (Math.abs(currentX) < 0.002) currentX = 0;
+    if (Math.abs(currentY) < 0.002) currentY = 0;
 
-  cosR = Math.cos(rot);
-  sinR = Math.sin(rot);
+    physics(dt, t);
+  }
 
   render(t);
   requestAnimationFrame(tick);
 }
 
 function worldToScreen(i, t) {
-  var L = layout[i];
-  var x = L.x * cosR - L.y * sinR;
-  var y = L.x * sinR + L.y * cosR;
-  var ph = i * 1.7;
-  x += Math.sin(t * 0.62 + ph) * 5.0;
-  y += Math.cos(t * 0.51 + ph * 1.3) * 5.0;
-  return { x: W() / 2 + x + viewX, y: H() / 2 + y + viewY };
+  var p = photos[i];
+  return { x: W() / 2 + p.x + viewX, y: H() / 2 + p.y + viewY };
+}
+
+/* ---------- 水面波纹 ---------- */
+function drawRipples() {
+  for (var i = 0; i < ripples.length; i++) {
+    var rp = ripples[i];
+    var a = rp.life * rp.life * rp.power;
+    if (a <= 0.01) continue;
+
+    var sx = rp.x + W() / 2 + viewX;
+    var sy = rp.y + H() / 2 + viewY;
+
+    /* 主波峰：径向渐变描边，形成柔和的环 */
+    var g1 = ctx.createRadialGradient(sx, sy, Math.max(0, rp.r - 22), sx, sy, rp.r + 22);
+    g1.addColorStop(0, 'rgba(130,205,255,0)');
+    g1.addColorStop(0.5, 'rgba(175,225,255,' + (a * 0.85).toFixed(3) + ')');
+    g1.addColorStop(1, 'rgba(130,205,255,0)');
+    ctx.strokeStyle = g1;
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.arc(sx, sy, rp.r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    /* 两道尾随的次级涟漪 */
+    for (var k = 1; k <= 2; k++) {
+      var rr = rp.r - k * 26;
+      if (rr <= 4) continue;
+      var gk = ctx.createRadialGradient(sx, sy, Math.max(0, rr - 14), sx, sy, rr + 14);
+      gk.addColorStop(0, 'rgba(130,205,255,0)');
+      gk.addColorStop(0.5, 'rgba(150,215,255,' + (a * 0.30 / k).toFixed(3) + ')');
+      gk.addColorStop(1, 'rgba(130,205,255,0)');
+      ctx.strokeStyle = gk;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(sx, sy, rr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    /* 中心高光，模拟落点 */
+    if (rp.r < 90) {
+      var g0 = ctx.createRadialGradient(sx, sy, 0, sx, sy, 70);
+      g0.addColorStop(0, 'rgba(200,240,255,' + (a * 0.42 * (1 - rp.r / 90)).toFixed(3) + ')');
+      g0.addColorStop(1, 'rgba(200,240,255,0)');
+      ctx.fillStyle = g0;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 70, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/* ---------- 光标处的柔光 ---------- */
+function drawCursorGlow() {
+  if (!cursorIn || openIdx >= 0) return;
+  var g = ctx.createRadialGradient(cursorX, cursorY, 0, cursorX, cursorY, CURSOR_R);
+  g.addColorStop(0, 'rgba(150,215,255,0.11)');
+  g.addColorStop(0.55, 'rgba(150,215,255,0.045)');
+  g.addColorStop(1, 'rgba(150,215,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(cursorX, cursorY, CURSOR_R, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function render(t) {
   ctx.clearRect(0, 0, W(), H());
 
-  ctx.fillStyle = 'rgba(255,255,255,0.035)';
-  for (var s = 0; s < 46; s++) {
-    var px = (s * 137.51 + t * 13) % W();
-    var py = (s * 251.73 + t * 9) % H();
-    var rr = 1 + (s % 3) * 0.6;
+  /* 水面反光碎点 */
+  ctx.fillStyle = 'rgba(255,255,255,0.038)';
+  for (var s = 0; s < 54; s++) {
+    var px = (s * 137.51 + Math.sin(t * 0.35 + s) * 40 + t * 11) % W();
+    var py = (s * 251.73 + Math.cos(t * 0.29 + s * 1.7) * 34 + t * 7) % H();
+    var rr = 1 + (s % 3) * 0.7;
     ctx.beginPath();
-    ctx.arc(px, py, rr, 0, Math.PI * 2);
+    ctx.arc(px < 0 ? px + W() : px, py < 0 ? py + H() : py, rr, 0, Math.PI * 2);
     ctx.fill();
   }
 
+  drawRipples();
+  drawCursorGlow();
+
   var n = photos.length;
-  var margin = cellSize * 1.4;
+  var margin = cellSize * 1.5;
 
   for (var i = 0; i < n; i++) {
+    var ph = photos[i];
     var pos = worldToScreen(i, t);
     if (pos.x < -margin || pos.x > W() + margin || pos.y < -margin || pos.y > H() + margin) continue;
 
-    var sp = makeSprite(photos[i]);
+    var sp = makeSprite(ph);
     if (!sp) {
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, cellSize / 2, 0, Math.PI * 2);
@@ -561,27 +935,36 @@ function render(t) {
       continue;
     }
 
-    var scale = (i === hoverIdx) ? 1.10 : 1.0;
+    var isHover = (i === hoverIdx);
+    var scale = (isHover ? 1.11 : 1.0) * (1 + Math.sin(t * 0.9 + ph.pulsePh) * 0.012);
     var w = sp.width * scale;
     var h = sp.height * scale;
 
-    if (i === hoverIdx) {
+    if (isHover) {
       ctx.save();
-      ctx.shadowColor = 'rgba(255,107,157,0.85)';
-      ctx.shadowBlur = 34;
+      ctx.shadowColor = 'rgba(255,107,157,0.9)';
+      ctx.shadowBlur = 38;
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, (cellSize / 2 + 4) * scale, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,107,157,0.16)';
+      ctx.arc(pos.x, pos.y, (cellSize / 2 + 5) * scale, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,107,157,0.18)';
       ctx.fill();
       ctx.restore();
     }
 
-    ctx.drawImage(sp, pos.x - w / 2, pos.y - h / 2, w, h);
+    /* 带自转的绘制，像水面上微微打转 */
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.rotate(ph.rot);
+    ctx.drawImage(sp, -w / 2, -h / 2, w, h);
+    ctx.restore();
 
-    var likes = photos[i].likes;
+    var likes = ph.likes;
     if (likes > 0) {
-      var bx = pos.x + (cellSize / 2) * scale - 6;
-      var by = pos.y - (cellSize / 2) * scale + 6;
+      var cosr = Math.cos(ph.rot), sinr = Math.sin(ph.rot);
+      var lx = (cellSize / 2) * scale - 6;
+      var ly = -(cellSize / 2) * scale + 6;
+      var bx = pos.x + lx * cosr - ly * sinr;
+      var by = pos.y + lx * sinr + ly * cosr;
       ctx.beginPath();
       ctx.arc(bx, by, 15, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255,45,120,0.94)';
@@ -618,26 +1001,44 @@ function onDown(x, y) {
   downX = lastX = x;
   downY = lastY = y;
   dragVX = dragVY = 0;
-  goalX = goalY = 0;
+  lastTrailT = 0;
   document.body.classList.add('dragging');
   noteActivity();
 }
 
 function onMove(x, y) {
+  cursorX = x;
+  cursorY = y;
+  cursorIn = true;
+
   if (!mouseDown) {
-    var idx = hitTest(x, y, performance.now() / 1000);
-    if (idx !== hoverIdx) {
-      hoverIdx = idx;
-      canvas.style.cursor = idx >= 0 ? 'pointer' : 'grab';
+    if (openIdx < 0) {
+      var idx = hitTest(x, y, performance.now() / 1000);
+      if (idx !== hoverIdx) {
+        hoverIdx = idx;
+        canvas.style.cursor = idx >= 0 ? 'pointer' : 'grab';
+      }
     }
     return;
   }
+
+  /* 拖拽 = 用手推一整片水 */
   var dx = x - lastX;
   var dy = y - lastY;
-  viewX += dx;
-  viewY += dy;
   dragVX = dx;
   dragVY = dy;
+
+  currentX = clamp(currentX + dx * 0.34, -10, 10);
+  currentY = clamp(currentY + dy * 0.34, -10, 10);
+
+  /* 拖拽尾迹荡起小涟漪 */
+  var now = performance.now();
+  var spd = Math.abs(dx) + Math.abs(dy);
+  if (spd > 4 && now - lastTrailT > 85) {
+    lastTrailT = now;
+    emitRipple(x, y, 0.34 + Math.min(spd / 60, 0.4));
+  }
+
   lastX = x;
   lastY = y;
 }
@@ -648,17 +1049,31 @@ function onUp(x, y) {
   document.body.classList.remove('dragging');
 
   var moved = Math.abs(x - downX) + Math.abs(y - downY);
-  if (moved < 7) {
-    var idx = hitTest(x, y, performance.now() / 1000);
+
+  if (moved < 8) {
+    var t = performance.now() / 1000;
+    var idx = hitTest(x, y, t);
+
     if (idx >= 0) {
       openViewer(idx);
-      dragVX = dragVY = 0;
+      currentX = currentY = 0;
+      noteActivity();
       return;
     }
+
+    /* 点在"水面"上：激起一组同心波纹 */
+    emitRipple(x, y, 1.25);
+    setTimeout(function () { if (openIdx < 0) emitRipple(x, y, 0.72); }, 130);
+    setTimeout(function () { if (openIdx < 0) emitRipple(x, y, 0.42); }, 260);
+
+    /* 同时给一个向外的整体推力 */
+    var ddx = x - W() / 2;
+    var ddy = y - H() / 2;
+    var dl = Math.sqrt(ddx * ddx + ddy * ddy) || 1;
+    currentX = clamp(currentX - ddx / dl * 1.6, -10, 10);
+    currentY = clamp(currentY - ddy / dl * 1.6, -10, 10);
   }
 
-  goalX = clamp(dragVX * 0.34, -16, 16);
-  goalY = clamp(dragVY * 0.34, -16, 16);
   dragVX = dragVY = 0;
   noteActivity();
 }
@@ -688,15 +1103,13 @@ canvas.addEventListener('touchend', function (e) {
 
 canvas.addEventListener('wheel', function (e) {
   e.preventDefault();
-  goalX = clamp(goalX - e.deltaX * 0.22, -14, 14);
-  goalY = clamp(goalY - e.deltaY * 0.22, -14, 14);
+  currentX = clamp(currentX - e.deltaX * 0.030, -10, 10);
+  currentY = clamp(currentY - e.deltaY * 0.030, -10, 10);
   noteActivity();
 }, { passive: false });
 
-canvas.addEventListener('dblclick', function (e) {
-  var idx = hitTest(e.clientX, e.clientY, performance.now() / 1000);
-  if (idx < 0) toggleFull();
-});
+canvas.addEventListener('mouseleave', function () { cursorIn = false; });
+window.addEventListener('blur', function () { cursorIn = false; });
 
 /* ---------- 放大查看 + 点赞 ---------- */
 function openViewer(i) {
@@ -707,6 +1120,8 @@ function openViewer(i) {
   refreshLikeUI(p);
   viewer.classList.add('open');
   goalX = goalY = velX = velY = 0;
+  currentX = currentY = 0;
+  cursorIn = false;
   noteActivity();
 }
 
@@ -856,7 +1271,6 @@ async function useDirectory(handle) {
 
   if (found.length === 0) {
     photos = [];
-    layout = [];
     recomputeLayout();
     emptyBox.classList.add('show');
     dirName.textContent = handle.name + '（空）';
@@ -999,11 +1413,12 @@ window.addEventListener('keydown', function (e) {
   if (e.key === 'Escape' && openIdx >= 0) { closeViewer(); return; }
   if (e.key === 'f' || e.key === 'F') { toggleFull(); return; }
   if (openIdx >= 0) return;
-  var step = 14;
-  if (e.key === 'ArrowLeft') { goalX -= step; noteActivity(); }
-  if (e.key === 'ArrowRight') { goalX += step; noteActivity(); }
-  if (e.key === 'ArrowUp') { goalY -= step; noteActivity(); }
-  if (e.key === 'ArrowDown') { goalY += step; noteActivity(); }
+  var step = 3.2;
+  if (e.key === 'ArrowLeft') { currentX -= step; noteActivity(); }
+  if (e.key === 'ArrowRight') { currentX += step; noteActivity(); }
+  if (e.key === 'ArrowUp') { currentY -= step; noteActivity(); }
+  if (e.key === 'ArrowDown') { currentY += step; noteActivity(); }
+  if (e.key === ' ') { emitRipple(W() / 2, H() / 2, 1.3); e.preventDefault(); noteActivity(); }
 });
 
 /* ---------- 演示照片 ---------- */
