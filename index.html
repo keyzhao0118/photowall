@@ -10,12 +10,25 @@
 <style>
   :root { --accent: #ff6b9d; --accent2: #7b5cff; }
 
+  /* ⚠️ 上游「站酷快乐体」(ZCOOL KuaiLe) 已停止维护，字体本身有缺陷：
+     数字 0 没有正确字形，会渲染成缺字方框（.notdef）。
+     又因为它在字体栈首位，浏览器认为 U+0030 已被覆盖，就不会回退到后续字体，
+     导致点赞数 0 / 10 / 100、力度 100% 等全部显示成方框。
+     解法：用一个只认领「数字 + 数字相关符号」的字体族，把这些字符
+     强制交给本机字体渲染；中文与拉丁字母仍由快乐体负责，可爱风格不受影响。 */
+  @font-face {
+    font-family: 'PWNumeric';
+    src: local('Microsoft YaHei'), local('Segoe UI'), local('PingFang SC'),
+         local('Hiragino Sans GB'), local('Helvetica Neue'), local('Arial');
+    unicode-range: U+0030-0039, U+0025, U+002B, U+002D, U+002E, U+002F, U+003A;
+  }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body { width: 100%; height: 100%; overflow: hidden; background: #06060f; }
 
   body {
-    font-family: 'ZCOOL KuaiLe', 'YouYuan', '幼圆', 'Microsoft YaHei', sans-serif;
+    font-family: 'PWNumeric', 'ZCOOL KuaiLe', 'YouYuan', '幼圆', 'Microsoft YaHei', sans-serif;
     user-select: none; -webkit-user-select: none;
     cursor: grab; color: #fff;
   }
@@ -611,7 +624,7 @@ function makeSprite(photo) {
   g.restore();
 
   var fs = Math.max(12, Math.round(cellSize * 0.145));
-  g.font = 'bold ' + fs + 'px "ZCOOL KuaiLe", "YouYuan", "幼圆", "Microsoft YaHei", sans-serif';
+  g.font = 'bold ' + fs + 'px "PWNumeric", "ZCOOL KuaiLe", "YouYuan", "幼圆", "Microsoft YaHei", sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.shadowColor = 'rgba(0,0,0,0.95)';
