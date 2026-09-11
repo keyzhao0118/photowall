@@ -381,6 +381,11 @@ var powerVal = document.getElementById('powerVal');
 /* ---------- 水流物理参数 ---------- */
 var FLOW_STRENGTH = 0.062;   /* 水流推力 */
 var FLOW_SCALE    = 0.0021;  /* 流场空间频率 */
+/* —— 聚集机制：锚点 + 牵引绳 ——
+   每张照片锚在一个位置上，牵引绳有松弛量，所以每张都能在锚点附近自由游走；
+   被水流冲散后，牵引绳会把它们拉回锚点，整群自动重聚合。
+   关键：用户拖动照片松手时，锚点会【搬到落点】（见 onUp），
+   所以照片就"住"在新位置了，不会被拉回原处。 */
 var FREE_RADIUS   = 24;      /* 牵引绳松弛半径：此范围内完全自由 */
 var SPRING_K      = 0.0022;  /* 牵引绳刚度（越小越散） */
 var SEP_K         = 0.62;    /* 照片互斥强度 */
@@ -409,6 +414,7 @@ var currentX = 0, currentY = 0;   /* 拖拽激起的整体水流 */
 var cursorEnergy = 0;             /* 光标拨水强度：只在鼠标真正移动时才有，停下就衰减 */
 var prevCursorX = 0, prevCursorY = 0;
 var effectPower = 1;              /* 动效力度 0~2，由顶栏滑杆控制 */
+var LAYOUT_MIN_DIST = 130;        /* 锚点之间应保持的最小距离 */
 var mouseDown = false;
 var dragVX = 0, dragVY = 0;
 var downX = 0, downY = 0;
@@ -502,6 +508,7 @@ function recomputeLayout() {
   spacing = s;
   cellSize = Math.round(s * 0.78);
   SEP_RADIUS = cellSize * 1.22;
+  LAYOUT_MIN_DIST = Math.max(cellSize * 1.16, s * 0.90);
 
   var cells = hexRings(rings);
   for (var k = 0; k < n; k++) {
@@ -541,14 +548,47 @@ function recomputeLayout() {
 
   /* 锚点松弛：抖动可能让相邻锚点挤在一起，用几轮互斥迭代推开。
      结果既是有机的散布，又保证任意两张照片不重叠。 */
-  relaxAnchors(Math.max(cellSize * 1.16, spacing * 0.90), 64);
-
-  for (var m = 0; m < n; m++) {
-    var q = photos[m];
-    var dist = Math.sqrt(q.hx * q.hx + q.hy * q.hy);
-    if (dist > clusterR) clusterR = dist;
-  }
+  relaxAnchors(LAYOUT_MIN_DIST, 64);
+  recomputeClusterRadius();
   sprites.clear();
+}
+
+/* 依据锚点重算群半径（相机边界转向用）。
+   锚点被搬动后必须重算，否则相机约束会用到过期的范围。 */
+function recomputeClusterRadius() {
+  clusterR = 0;
+  for (var i = 0; i < photos.length; i++) {
+    var p = photos[i];
+    var d = Math.sqrt(p.hx * p.hx + p.hy * p.hy);
+    if (d > clusterR) clusterR = d;
+  }
+}
+
+/* 拖动落点后的局部让位：
+   只推开【邻居】的锚点，被拖动那张的锚点始终钉在用户放下的位置。
+   （若沿用 relaxAnchors，会把落点自己的锚点也推开几十像素，
+     照片就"停不准"了 —— 这不是用户想要的。） */
+function yieldAnchorsAround(idx, iterations) {
+  var n = photos.length;
+  var a = photos[idx];
+  if (!a) return;
+  var R = LAYOUT_MIN_DIST;
+  var R2 = R * R;
+  for (var it = 0; it < iterations; it++) {
+    for (var j = 0; j < n; j++) {
+      if (j === idx) continue;
+      var b = photos[j];
+      var dx = a.hx - b.hx;
+      var dy = a.hy - b.hy;
+      var d2 = dx * dx + dy * dy;
+      if (d2 >= R2 || d2 < 0.0001) continue;
+      var d = Math.sqrt(d2);
+      /* 让位量由邻居全额承担，带阻尼避免过冲与震荡 */
+      var push = (R - d) * 0.55;
+      b.hx -= (dx / d) * push;
+      b.hy -= (dy / d) * push;
+    }
+  }
 }
 
 /* 迭代式互斥松弛：把靠得太近的锚点推开，得到自然又不重叠的初始散布 */
@@ -718,7 +758,8 @@ function physics(dt, t) {
     p.vx += currentX * P * dt;
     p.vy += currentY * P * dt;
 
-    /* 牵引绳：超出松弛半径才回拉，半径内完全自由 */
+    /* 牵引绳：超出松弛半径才回拉，半径内完全自由。
+       锚点会在用户拖动松手时搬到落点，所以这里拉的是"用户安置的家"。 */
     dx = p.hx - p.x;
     dy = p.hy - p.y;
     d = Math.sqrt(dx * dx + dy * dy);
@@ -1312,8 +1353,18 @@ function onUp(x, y) {
     dragIdx = -1;
     dragThrowX = dragThrowY = 0;
 
-    /* 若只是轻点没拖动，给一点视觉反馈（不至于毫无响应） */
-    if (moved < 8) {
+    /* ★ 关键：把锚点搬到落点。
+       锚点就是这张照片"住"的地方 —— 搬过去之后它便留在新位置，
+       不会再被牵引绳拉回原处；同时整群的重聚合能力完全不受影响。 */
+    if (moved >= 8) {
+      p.hx = p.x;
+      p.hy = p.y;
+      /* 邻居的锚点让开位置，避免和落点顶牛互相较劲；
+         落点锚点本身保持不动，所以照片会准确停在你放下的地方。 */
+      yieldAnchorsAround(pi, 26);
+      recomputeClusterRadius();
+    } else {
+      /* 若只是轻点没拖动，给一点视觉反馈（不至于毫无响应） */
       emitRipple(x, y, 0.5);
       p.spin += 0.06;
     }
